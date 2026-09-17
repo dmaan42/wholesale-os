@@ -13,8 +13,8 @@ price: process.env.STRIPE_PRICE_ID as string,
 quantity: 1,
 },
 ],
-success_url: "http://localhost:3000/dashboard?paid=1",
-cancel_url: "http://localhost:3000/settings",
+success_url: "http://wholesale-os-amber.vercel.app/dashboard?paid=1",
+cancel_url: "http://wholesale-os-amber.vercel.app/settings",
 });
 
 return NextResponse.json({ url: session.url });
