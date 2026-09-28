@@ -6,8 +6,7 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const supabase = createClient(
-      "https://awwtlkreomchzwtqcdys.supabase.co",
-      sb_publishable_k2qw2vBO-jCbk9NCLZaJSg_7wbYrmST
+      "https://awwtlkreomchzwtqcdys.supabase.co", "sb_publishable_k2qw2vBO-jCbk9NCLZaJSg_7wbYrmST"
     );
 
     const { error } = await supabase.from("public_leads").insert({
