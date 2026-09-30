@@ -28,7 +28,7 @@ export default function SellPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     setLoading(false);
     if (!res.ok) {
       alert(data.error || "Lead did not save");
@@ -41,10 +41,14 @@ export default function SellPage() {
     return (
       <div className="min-h-screen bg-emerald-950 text-white flex items-center justify-center p-6">
         <div className="max-w-md text-center">
+          <p className="mb-2 text-emerald-300">Real Estate Solutionz</p>
           <h1 className="text-3xl font-bold mb-3">We got your info</h1>
-          <p className="text-emerald-100">
-            A local cash buyer specialist will contact you shortly.
+          <p className="text-emerald-100 mb-4">
+            We’ll call you shortly about a cash offer.
           </p>
+          <a href="tel:8054757616" className="text-xl font-semibold underline">
+            Call us: 805-475-7616
+          </a>
         </div>
       </div>
     );
@@ -53,8 +57,17 @@ export default function SellPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white p-6">
       <div className="mx-auto max-w-xl">
-        <p className="text-emerald-400 font-semibold mb-2">We Buy Houses</p>
+        <p className="text-emerald-400 font-semibold mb-1">Real Estate Solutionz</p>
+        <p className="text-slate-400 mb-4">
+          Call or text:{" "}
+          <a href="tel:8054757616" className="text-white underline">
+            805-475-7616
+          </a>
+        </p>
         <h1 className="text-4xl font-bold mb-3">Get a cash offer for your house</h1>
+        <p className="text-slate-300 mb-8">
+          We buy houses as-is. No repairs, no commissions, no waiting on the market.
+        </p>
         <form onSubmit={submit} className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6">
           <input required placeholder="Your name" value={form.owner_name} onChange={(e) => update("owner_name", e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3" />
           <input required placeholder="Phone" value={form.phone} onChange={(e) => update("phone", e.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3" />
