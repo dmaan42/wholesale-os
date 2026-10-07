@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
-import { calculateMAO } from "@/lib/store";
+import { calculateMAO } from "@/lib/db";
 import { formatCurrency } from "@/lib/utils";
-import { getUser } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 export default function AnalyzerPage() {
@@ -16,9 +16,11 @@ export default function AnalyzerPage() {
   const [desiredProfit, setDesiredProfit] = useState(25000);
   const [assignmentFee, setAssignmentFee] = useState(15000);
 
+  const { user, loading: authLoading } = useAuth();
+
   useEffect(() => {
-    if (!getUser()) router.push("/login");
-  }, [router]);
+    if (!authLoading && !user) router.push("/login");
+  }, [router, user, authLoading]);
 
   const mao = calculateMAO(arv, repairs, holding, closing, desiredProfit);
   const offerPrice = Math.max(0, mao - assignmentFee);

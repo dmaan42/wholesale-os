@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import LeadModal from "@/components/LeadModal";
 import { Lead, PIPELINE_STAGES } from "@/lib/types";
-import { getLeads, addLead, updateLead, deleteLead, getUser } from "@/lib/store";
+import { getLeads, addLead, updateLead, deleteLead } from "@/lib/db";
+import { useAuth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
@@ -15,12 +16,28 @@ export default function LeadsPage() {
   const [selected, setSelected] = useState<Lead | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
+  const refresh = async () => {
+    try {
+      setLeads(await getLeads());
+    } catch (e: any) {
+      setPageError(e.message || "Failed to load leads");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!getUser()) router.push("/login");
-    setLeads(getLeads());
-  }, [router]);
+    if (!authLoading && !user) {
+      router.push("/login");
+      return;
+    }
+    if (user) refresh();
+  }, [user, authLoading, router]);
 
   const filtered = leads.filter(
     (l) =>
@@ -29,8 +46,8 @@ export default function LeadsPage() {
       l.city.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleAdd = () => {
-    const newLead = addLead({
+  const handleAdd = async () => {
+    const newLead = await addLead({
       address: "",
       city: "",
       state: "",
@@ -46,7 +63,7 @@ export default function LeadsPage() {
       offerPrice: 0,
       notes: "",
     });
-    setLeads(getLeads());
+    await refresh();
     setSelected(newLead);
     setModalOpen(true);
     setShowAdd(false);
@@ -81,6 +98,15 @@ export default function LeadsPage() {
           </div>
         </div>
 
+        {pageError && (
+          <p className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            {pageError}
+          </p>
+        )}
+
+        {loading ? (
+          <p className="py-12 text-center text-slate-500">Loading leads…</p>
+        ) : (
         <div className="overflow-hidden rounded-xl border border-slate-800">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-900 text-slate-400">
@@ -137,19 +163,20 @@ export default function LeadsPage() {
             <p className="py-12 text-center text-slate-500">No leads found</p>
           )}
         </div>
+        )}
       </main>
 
       <LeadModal
         lead={selected}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSave={(updated) => {
-          updateLead(updated.id, updated);
-          setLeads(getLeads());
+        onSave={async (updated) => {
+          await updateLead(updated.id, updated);
+          await refresh();
         }}
-        onDelete={(id) => {
-          deleteLead(id);
-          setLeads(getLeads());
+        onDelete={async (id) => {
+          await deleteLead(id);
+          await refresh();
         }}
       />
     </div>
