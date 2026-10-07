@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
-import { getUser } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 const templates = [
@@ -58,9 +58,11 @@ Seller Signature: ________________ Date: ________
 export default function ContractsPage() {
   const router = useRouter();
 
+  const { user, loading: authLoading } = useAuth();
+
   useEffect(() => {
-    if (!getUser()) router.push("/login");
-  }, [router]);
+    if (!authLoading && !user) router.push("/login");
+  }, [router, user, authLoading]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);

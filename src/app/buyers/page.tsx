@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import { Buyer } from "@/lib/types";
-import { getBuyers, addBuyer, getUser } from "@/lib/store";
+import { getBuyers, addBuyer } from "@/lib/db";
+import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 export default function BuyersPage() {
   const [buyers, setBuyers] = useState<Buyer[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -19,16 +21,28 @@ export default function BuyersPage() {
     notes: "",
   });
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
+  const refresh = async () => {
+    try {
+      setBuyers(await getBuyers());
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!getUser()) router.push("/login");
-    setBuyers(getBuyers());
-  }, [router]);
+    if (!authLoading && !user) {
+      router.push("/login");
+      return;
+    }
+    if (user) refresh();
+  }, [user, authLoading, router]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    addBuyer(form);
-    setBuyers(getBuyers());
+    await addBuyer(form);
+    await refresh();
     setShowForm(false);
     setForm({ name: "", phone: "", email: "", buyBox: "", preferredAreas: "", proofOfFunds: true, notes: "" });
   };
@@ -68,6 +82,9 @@ export default function BuyersPage() {
           </div>
         )}
 
+        {loading ? (
+          <p className="py-12 text-center text-slate-500">Loading buyers…</p>
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {buyers.map((b) => (
             <div key={b.id} className="rounded-xl border border-slate-800 bg-slate-900 p-5">
@@ -94,6 +111,7 @@ export default function BuyersPage() {
             </div>
           ))}
         </div>
+        )}
       </main>
     </div>
   );

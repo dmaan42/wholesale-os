@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Lead, LeadStatus, PIPELINE_STAGES } from "@/lib/types";
+import { getCallLogs, type CallLog } from "@/lib/db";
+import { useAuth } from "@/lib/auth";
 
 interface Props {
   lead: Lead | null;
@@ -13,10 +15,48 @@ interface Props {
 
 export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Props) {
   const [form, setForm] = useState<Partial<Lead>>({});
+  const [calling, setCalling] = useState(false);
+  const [callMsg, setCallMsg] = useState("");
+  const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const { session } = useAuth();
 
   useEffect(() => {
-    if (lead) setForm({ ...lead });
-  }, [lead]);
+    if (lead && open) {
+      setForm({ ...lead });
+      setCallMsg("");
+      getCallLogs(lead.id).then(setCallLogs).catch(() => {});
+    }
+  }, [lead, open]);
+
+  const handleCallAI = async () => {
+    if (!lead) return;
+    if (!lead.phone) {
+      setCallMsg("Add a phone number to the lead first.");
+      return;
+    }
+    setCalling(true);
+    setCallMsg("");
+    try {
+      const res = await fetch("/api/dial", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({ leadId: lead.id, phone: lead.phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Call failed");
+      setCallMsg("📞 Calling now — the outcome and recording will appear here when it finishes.");
+      getCallLogs(lead.id).then(setCallLogs).catch(() => {});
+    } catch (e: any) {
+      setCallMsg(e.message || "Call failed");
+    } finally {
+      setCalling(false);
+    }
+  };
 
   if (!open || !lead) return null;
 
@@ -174,20 +214,62 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
               onChange={(e) => handleChange("notes", e.target.value)}
             />
           </div>
+
+          <div>
+            <label className="mb-2 block text-xs font-medium text-slate-400">
+              AI Call History {callLogs.length > 0 && `(${callLogs.length})`}
+            </label>
+            {callLogs.length === 0 ? (
+              <p className="text-xs text-slate-600">No AI calls yet — hit “Call with AI” below.</p>
+            ) : (
+              <div className="space-y-2">
+                {callLogs.slice(0, 3).map((c) => (
+                  <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-800/50 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-300">
+                        {new Date(c.createdAt).toLocaleDateString()} · {c.status}
+                        {c.durationSeconds > 0 && ` · ${c.durationSeconds}s`}
+                      </span>
+                      {c.recordingUrl && (
+                        <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
+                          ▶ Recording
+                        </a>
+                      )}
+                    </div>
+                    {(c.outcome || c.summary) && (
+                      <p className="mt-1 text-slate-400">{c.outcome || c.summary}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-slate-700 px-6 py-4">
-          <button
-            onClick={() => {
-              if (confirm("Delete this lead?")) {
-                onDelete(lead.id);
-                onClose();
-              }
-            }}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10"
-          >
-            🗑️ Delete
-          </button>
+        {callMsg && (
+          <p className="px-6 pt-1 text-xs text-slate-400">{callMsg}</p>
+        )}
+        <div className="flex items-center justify-between gap-3 border-t border-slate-700 px-6 py-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (confirm("Delete this lead?")) {
+                  onDelete(lead.id);
+                  onClose();
+                }
+              }}
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10"
+            >
+              🗑️ Delete
+            </button>
+            <button
+              onClick={handleCallAI}
+              disabled={calling}
+              className="flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-60"
+            >
+              {calling ? "Dialing…" : "📞 Call with AI"}
+            </button>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={onClose}

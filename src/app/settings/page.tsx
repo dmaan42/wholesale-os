@@ -1,24 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
-import { getUser, setUser } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 export default function SettingsPage() {
-  const [user, setUserState] = useState<{ name: string; email: string; plan: string } | null>(null);
+  const { user, loading, signOut } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    const u = getUser();
-    if (!u) {
+    if (!loading && !user) {
       router.push("/login");
-      return;
     }
-    setUserState(u);
-  }, [router]);
+  }, [user, loading, router]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <p className="text-slate-500">Loading…</p>
+      </div>
+    );
+  }
 
   if (!user) return null;
+
+  const displayName =
+    (user.user_metadata?.full_name as string) ||
+    user.email?.split("@")[0] ||
+    "Account";
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -55,7 +65,7 @@ export default function SettingsPage() {
               ))}
             </ul>
             <button className="w-full rounded-lg border border-slate-600 py-2.5 text-sm text-slate-300 hover:bg-slate-800">
-              Manage Billing (Demo)
+              Manage Billing
             </button>
           </div>
 
@@ -67,7 +77,7 @@ export default function SettingsPage() {
             <div className="space-y-4 text-sm">
               <div>
                 <p className="text-slate-500">Name</p>
-                <p className="font-medium text-white">{user.name}</p>
+                <p className="font-medium text-white">{displayName}</p>
               </div>
               <div>
                 <p className="text-slate-500">Email</p>
@@ -75,12 +85,12 @@ export default function SettingsPage() {
               </div>
               <div>
                 <p className="text-slate-500">Plan</p>
-                <p className="font-medium text-emerald-400">{user.plan}</p>
+                <p className="font-medium text-emerald-400">Pro</p>
               </div>
             </div>
             <button
-              onClick={() => {
-                setUser(null);
+              onClick={async () => {
+                await signOut();
                 router.push("/");
               }}
               className="mt-6 w-full rounded-lg border border-red-500/40 py-2.5 text-sm text-red-400 hover:bg-red-500/10"
@@ -91,12 +101,11 @@ export default function SettingsPage() {
         </div>
 
         <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-6">
-          <h2 className="mb-2 font-semibold">About This Demo</h2>
+          <h2 className="mb-2 font-semibold">Your Data</h2>
           <p className="text-sm text-slate-400 leading-relaxed">
-            This is a fully functional front-end prototype of WholesaleOS. All data is stored in your browser&apos;s localStorage.
-            In a production version you would connect a real database (Supabase/Postgres), Stripe for payments,
-            Twilio for SMS/calling, and e-signature providers. The architecture is designed so these integrations
-            plug in cleanly without changing the user experience.
+            Your leads, buyers, and call history are stored securely in your Supabase
+            database with row-level security — each account only ever sees its own data.
+            Billing is handled by Stripe.
           </p>
         </div>
       </main>

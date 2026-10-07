@@ -5,7 +5,8 @@ import Sidebar from "@/components/Sidebar";
 import PipelineCard from "@/components/PipelineCard";
 import LeadModal from "@/components/LeadModal";
 import { Lead, PIPELINE_STAGES } from "@/lib/types";
-import { getLeads, updateLead, deleteLead, getUser } from "@/lib/store";
+import { getLeads, updateLead, deleteLead } from "@/lib/db";
+import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
 import Link from "next/link";
@@ -14,25 +15,34 @@ export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selected, setSelected] = useState<Lead | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
+  const refresh = async () => {
+    try {
+      setLeads(await getLeads());
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const user = getUser();
-    if (!user) {
+    if (!authLoading && !user) {
       router.push("/login");
       return;
     }
-    setLeads(getLeads());
-  }, [router]);
+    if (user) refresh();
+  }, [user, authLoading, router]);
 
-  const handleSave = (updated: Lead) => {
-    updateLead(updated.id, updated);
-    setLeads(getLeads());
+  const handleSave = async (updated: Lead) => {
+    await updateLead(updated.id, updated);
+    await refresh();
   };
 
-  const handleDelete = (id: string) => {
-    deleteLead(id);
-    setLeads(getLeads());
+  const handleDelete = async (id: string) => {
+    await deleteLead(id);
+    await refresh();
   };
 
   const stages = PIPELINE_STAGES.filter((s) => s.id !== "dead");
@@ -55,6 +65,9 @@ export default function DashboardPage() {
           </Link>
         </div>
 
+        {loading ? (
+          <p className="py-12 text-center text-slate-500">Loading pipeline…</p>
+        ) : (
         <div className="flex gap-4 overflow-x-auto pb-4">
           {stages.map((stage) => {
             const stageLeads = leads.filter((l) => l.status === stage.id);
@@ -86,6 +99,7 @@ export default function DashboardPage() {
             );
           })}
         </div>
+        )}
       </main>
 
       <LeadModal

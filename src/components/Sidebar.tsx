@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { getUser, setUser } from "@/lib/store";
-import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 const navItems = [
   { href: "/dashboard", label: "Pipeline", icon: "📊" },
@@ -17,14 +16,15 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [user, setUserState] = useState<{ name: string; email: string; plan: string } | null>(null);
+  const { user, loading, signOut } = useAuth();
 
-  useEffect(() => {
-    setUserState(getUser());
-  }, []);
+  const displayName =
+    (user?.user_metadata?.full_name as string) ||
+    user?.email?.split("@")[0] ||
+    "Account";
 
-  const handleLogout = () => {
-    setUser(null);
+  const handleLogout = async () => {
+    await signOut();
     window.location.href = "/";
   };
 
@@ -61,13 +61,15 @@ export default function Sidebar() {
         </nav>
 
         <div className="border-t border-slate-800 p-4">
-          {user ? (
+          {loading ? (
+            <div className="h-16 animate-pulse rounded-lg bg-slate-800/60" />
+          ) : user ? (
             <div className="space-y-3">
               <div>
-                <p className="text-sm font-medium">{user.name}</p>
+                <p className="text-sm font-medium">{displayName}</p>
                 <p className="text-xs text-slate-500">{user.email}</p>
                 <span className="mt-1 inline-block rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-400">
-                  {user.plan} Plan
+                  Pro Plan
                 </span>
               </div>
               <button

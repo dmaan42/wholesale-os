@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+// NOTE: credentials come from environment variables — never hardcode keys.
+// Required in Vercel / .env.local: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const supabase = createClient(
-      "https://awwtlkreomchzwtqcdys.supabase.co", "sb_publishable_k2qw2vBO-jCbk9NCLZaJSg_7wbYrmST"
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json(
+        { error: "Supabase is not configured" },
+        { status: 500 }
+      );
+    }
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     const { error } = await supabase.from("public_leads").insert({
       id: crypto.randomUUID(),
