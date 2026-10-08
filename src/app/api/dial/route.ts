@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireActiveSubscription } from "@/lib/api-auth";
 import { resolveVapiCreds, createVapiCall } from "@/lib/vapi";
 
 export const runtime = "nodejs";
@@ -35,6 +36,16 @@ export async function POST(req: Request) {
     } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    }
+
+    // Paywall: placing calls requires an active subscription or trial.
+    try {
+      await requireActiveSubscription(supabase, user.id);
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: e.message },
+        { status: e.status || 402 }
+      );
     }
 
     // The caller's own Vapi credentials — billed to their account.

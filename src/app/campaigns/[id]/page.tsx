@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import { useAuth } from "@/lib/auth";
 
 function authHeaders(session: any): HeadersInit {
@@ -85,6 +86,7 @@ export default function CampaignDetailPage() {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   return (
+    <SubscriptionGate>
     <div className="min-h-screen bg-slate-950 text-white">
       <Sidebar />
       <main className="ml-64 p-8">
@@ -198,5 +200,6 @@ export default function CampaignDetailPage() {
         )}
       </main>
     </div>
+    </SubscriptionGate>
   );
 }

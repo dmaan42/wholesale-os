@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import { useAuth } from "@/lib/auth";
 import { getLeads, getCampaigns, type Campaign } from "@/lib/db";
 import type { Lead } from "@/lib/types";
@@ -143,6 +144,7 @@ export default function CampaignsPage() {
   };
 
   return (
+    <SubscriptionGate>
     <div className="min-h-screen bg-slate-950 text-white">
       <Sidebar />
       <main className="ml-64 p-8">
@@ -318,5 +320,6 @@ export default function CampaignsPage() {
         )}
       </main>
     </div>
+    </SubscriptionGate>
   );
 }

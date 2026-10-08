@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/lib/api-auth";
+import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
 import { createVapiCampaign, toE164, resolveVapiCreds } from "@/lib/vapi";
 
 export const runtime = "nodejs";
@@ -36,6 +36,9 @@ export async function POST(req: Request) {
     const auth = await requireApiUser(req);
     supabase = auth.supabase;
     const { user } = auth;
+
+    // Paywall: launching campaigns requires an active subscription or trial.
+    await requireActiveSubscription(supabase, user.id);
 
     // The caller's own Vapi credentials — billed to their account.
     // Throws a user-actionable error when Vapi isn't connected.
