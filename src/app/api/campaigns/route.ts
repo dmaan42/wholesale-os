@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
-import { createVapiCampaign, toE164 } from "@/lib/vapi";
+import { createVapiCampaign, toE164, resolveVapiCreds } from "@/lib/vapi";
 
 export const runtime = "nodejs";
 
@@ -36,6 +36,10 @@ export async function POST(req: Request) {
     const auth = await requireApiUser(req);
     supabase = auth.supabase;
     const { user } = auth;
+
+    // The caller's own Vapi credentials — billed to their account.
+    // Throws a user-actionable error when Vapi isn't connected.
+    const creds = await resolveVapiCreds(supabase, user.id);
 
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "Untitled campaign").slice(0, 120);
@@ -151,7 +155,7 @@ export async function POST(req: Request) {
     // 4) Launch on Vapi. This is the point of no return for real calls —
     //    a timeout/5xx here does NOT prove failure, so we verify by reading
     //    the campaign back before claiming success (see vapi.ts notes).
-    const vapiCampaign = await createVapiCampaign({
+    const vapiCampaign = await createVapiCampaign(creds, {
       name,
       customers: audience.map((a) => ({ number: a.phone, name: a.name })),
       maxConcurrency,

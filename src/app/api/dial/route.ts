@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveVapiCreds, createVapiCall } from "@/lib/vapi";
 
 export const runtime = "nodejs";
 
 // POST /api/dial  { leadId, phone }
 // Verifies the caller is a signed-in WholesaleOS user, logs the call, then
-// places an outbound AI call through Vapi. Call outcomes arrive later at
-// /api/voice-webhook and update the call log + pipeline stage automatically.
+// places an outbound AI call through the CALLER'S OWN Vapi account
+// (connected in Settings → AI Calling). Usage is billed to their Vapi
+// account, never to the app owner's.
+// Call outcomes arrive later at /api/voice-webhook and update the call log +
+// pipeline stage automatically.
 //
-// Required env: VAPI_API_KEY, VAPI_ASSISTANT_ID, VAPI_PHONE_NUMBER_ID,
-//               NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+// Required: the user must have connected Vapi in Settings.
 export async function POST(req: Request) {
   try {
     const { leadId, phone } = await req.json();
@@ -17,19 +20,6 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "leadId and phone are required" },
         { status: 400 }
-      );
-    }
-
-    const apiKey = process.env.VAPI_API_KEY;
-    const assistantId = process.env.VAPI_ASSISTANT_ID;
-    const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
-    if (!apiKey || !assistantId || !phoneNumberId) {
-      return NextResponse.json(
-        {
-          error:
-            "Voice calling isn't configured yet — set VAPI_API_KEY, VAPI_ASSISTANT_ID, and VAPI_PHONE_NUMBER_ID.",
-        },
-        { status: 503 }
       );
     }
 
@@ -45,6 +35,14 @@ export async function POST(req: Request) {
     } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+    }
+
+    // The caller's own Vapi credentials — billed to their account.
+    let creds;
+    try {
+      creds = await resolveVapiCreds(supabase, user.id);
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
     }
 
     const { data: lead, error: leadErr } = await supabase
@@ -73,34 +71,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not log call" }, { status: 500 });
     }
 
-    const vapiRes = await fetch("https://api.vapi.ai/call", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    const vapiData = await createVapiCall(creds, {
+      customerNumber: phone,
+      customerName: lead.owner_name || undefined,
+      metadata: {
+        wholesaleOsLeadId: leadId,
+        wholesaleOsUserId: user.id,
+        wholesaleOsCallLogId: log.id,
       },
-      body: JSON.stringify({
-        assistantId,
-        phoneNumberId,
-        customer: { number: phone, name: lead.owner_name || undefined },
-        metadata: {
-          wholesaleOsLeadId: leadId,
-          wholesaleOsUserId: user.id,
-          wholesaleOsCallLogId: log.id,
-        },
-      }),
-    });
-    const vapiData = await vapiRes.json().catch(() => ({} as any));
-    if (!vapiRes.ok) {
+    }).catch((e: any) => ({ __vapiError: e.message || "Voice provider error" }));
+    if ((vapiData as any).__vapiError) {
       await supabase
         .from("call_logs")
         .update({
           status: "failed",
-          summary: `Provider error: ${vapiData?.message || vapiRes.status}`,
+          summary: `Provider error: ${(vapiData as any).__vapiError}`,
         })
         .eq("id", log.id);
       return NextResponse.json(
-        { error: vapiData?.message || "Voice provider rejected the call" },
+        { error: (vapiData as any).__vapiError },
         { status: 502 }
       );
     }

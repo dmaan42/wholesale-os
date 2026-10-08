@@ -1,32 +1,55 @@
 /**
- * Server-only Vapi API helpers (batch campaigns via POST /v2/campaign).
- * Never import from client components — this reads the private API key.
+ * Server-only Vapi API helpers (single calls + batch campaigns).
+ * Never import from client components — these handle private API keys.
+ *
+ * Credentials are per-user: each customer connects their own Vapi account
+ * in Settings, and calls are billed to THEIR Vapi account, never the
+ * app owner's. Use resolveVapiCreds() to load the caller's keys.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const VAPI_BASE = "https://api.vapi.ai";
 
-function vapiKey(): string {
-  const key = process.env.VAPI_API_KEY;
-  if (!key) throw new Error("VAPI_API_KEY is not set in Vercel env vars.");
-  return key;
+export interface VapiCreds {
+  apiKey: string;
+  assistantId: string;
+  phoneNumberId: string;
 }
 
-function vapiIds(): { assistantId: string; phoneNumberId: string } {
-  const assistantId = process.env.VAPI_ASSISTANT_ID;
-  const phoneNumberId = process.env.VAPI_PHONE_NUMBER_ID;
-  if (!assistantId || !phoneNumberId) {
+/**
+ * Load the calling user's Vapi credentials from their profile.
+ * Throws a clear, user-actionable error when they haven't connected Vapi.
+ */
+export async function resolveVapiCreds(
+  supabase: SupabaseClient,
+  userId: string
+): Promise<VapiCreds> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("vapi_api_key, vapi_assistant_id, vapi_phone_number_id")
+    .eq("id", userId)
+    .single();
+  if (error || !data?.vapi_api_key || !data?.vapi_assistant_id || !data?.vapi_phone_number_id) {
     throw new Error(
-      "VAPI_ASSISTANT_ID / VAPI_PHONE_NUMBER_ID are not set in Vercel env vars."
+      "Voice calling isn't connected — open Settings → AI Calling and connect your Vapi account first."
     );
   }
-  return { assistantId, phoneNumberId };
+  return {
+    apiKey: data.vapi_api_key as string,
+    assistantId: data.vapi_assistant_id as string,
+    phoneNumberId: data.vapi_phone_number_id as string,
+  };
 }
 
-async function vapiFetch(path: string, init?: RequestInit): Promise<any> {
+async function vapiFetch(
+  path: string,
+  creds: VapiCreds,
+  init?: RequestInit
+): Promise<any> {
   const res = await fetch(`${VAPI_BASE}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${vapiKey()}`,
+      Authorization: `Bearer ${creds.apiKey}`,
       "Content-Type": "application/json",
       ...((init?.headers as Record<string, string>) ?? {}),
     },
@@ -40,6 +63,29 @@ async function vapiFetch(path: string, init?: RequestInit): Promise<any> {
     throw err;
   }
   return data;
+}
+
+/** Place a single outbound AI call. Returns the Vapi call object. */
+export async function createVapiCall(
+  creds: VapiCreds,
+  opts: {
+    customerNumber: string;
+    customerName?: string;
+    metadata?: Record<string, string>;
+  }
+): Promise<any> {
+  return vapiFetch("/call", creds, {
+    method: "POST",
+    body: JSON.stringify({
+      assistantId: creds.assistantId,
+      phoneNumberId: creds.phoneNumberId,
+      customer: {
+        number: opts.customerNumber,
+        ...(opts.customerName ? { name: opts.customerName } : {}),
+      },
+      ...(opts.metadata ? { metadata: opts.metadata } : {}),
+    }),
+  });
 }
 
 export interface VapiCustomer {
@@ -61,13 +107,13 @@ export interface CreateCampaignOptions {
  * unless schedulePlan is provided. Returns the Vapi campaign object.
  */
 export async function createVapiCampaign(
+  creds: VapiCreds,
   opts: CreateCampaignOptions
 ): Promise<any> {
-  const { assistantId, phoneNumberId } = vapiIds();
   const body: Record<string, unknown> = {
     name: opts.name,
-    assistantId,
-    phoneNumberId,
+    assistantId: creds.assistantId,
+    phoneNumberId: creds.phoneNumberId,
     customers: opts.customers,
     maxConcurrency: opts.maxConcurrency ?? 1,
   };
@@ -78,30 +124,41 @@ export async function createVapiCampaign(
       ...(opts.latestAt ? { latestAt: opts.latestAt } : {}),
     };
   }
-  return vapiFetch("/v2/campaign", {
+  return vapiFetch("/v2/campaign", creds, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 /** Live campaign state + counters. */
-export async function getVapiCampaign(id: string): Promise<any> {
-  return vapiFetch(`/v2/campaign/${encodeURIComponent(id)}?includeCounters=true`);
+export async function getVapiCampaign(
+  creds: VapiCreds,
+  id: string
+): Promise<any> {
+  return vapiFetch(
+    `/v2/campaign/${encodeURIComponent(id)}?includeCounters=true`,
+    creds
+  );
 }
 
 /** Audience members with per-contact status. */
 export async function getVapiCampaignContacts(
+  creds: VapiCreds,
   id: string,
   limit = 100
 ): Promise<any> {
   return vapiFetch(
-    `/v2/campaign/${encodeURIComponent(id)}/contacts?limit=${limit}`
+    `/v2/campaign/${encodeURIComponent(id)}/contacts?limit=${limit}`,
+    creds
   );
 }
 
 /** Stop a scheduled/running campaign. Calls already in progress may finish. */
-export async function cancelVapiCampaign(id: string): Promise<any> {
-  return vapiFetch(`/v2/campaign/${encodeURIComponent(id)}`, {
+export async function cancelVapiCampaign(
+  creds: VapiCreds,
+  id: string
+): Promise<any> {
+  return vapiFetch(`/v2/campaign/${encodeURIComponent(id)}`, creds, {
     method: "PATCH",
     body: JSON.stringify({ status: "cancelled" }),
   });

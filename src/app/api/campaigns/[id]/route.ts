@@ -4,6 +4,7 @@ import {
   getVapiCampaign,
   getVapiCampaignContacts,
   cancelVapiCampaign,
+  resolveVapiCreds,
 } from "@/lib/vapi";
 
 export const runtime = "nodejs";
@@ -31,15 +32,16 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { campaign } = await ownCampaign(req, id);
+    const { user, supabase, campaign } = await ownCampaign(req, id);
+    const creds = await resolveVapiCreds(supabase, user.id);
 
     let live: any = null;
     let liveError: string | null = null;
     if (campaign.vapi_campaign_id) {
       try {
         const [state, contacts] = await Promise.all([
-          getVapiCampaign(campaign.vapi_campaign_id),
-          getVapiCampaignContacts(campaign.vapi_campaign_id, 100),
+          getVapiCampaign(creds, campaign.vapi_campaign_id),
+          getVapiCampaignContacts(creds, campaign.vapi_campaign_id, 100),
         ]);
         live = { ...state, contacts: contacts?.contacts ?? contacts ?? [] };
       } catch (e: any) {
@@ -63,14 +65,15 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { supabase, campaign } = await ownCampaign(req, id);
+    const { user, supabase, campaign } = await ownCampaign(req, id);
     const body = await req.json().catch(() => ({}));
 
     if (body.action !== "cancel") {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }
     if (campaign.vapi_campaign_id) {
-      await cancelVapiCampaign(campaign.vapi_campaign_id);
+      const creds = await resolveVapiCreds(supabase, user.id);
+      await cancelVapiCampaign(creds, campaign.vapi_campaign_id);
     }
     await supabase
       .from("campaigns")
