@@ -325,3 +325,203 @@ export function calculateMAO(
   const mao = arv * 0.7 - repairs - holding - closing - desiredProfit;
   return Math.max(0, Math.round(mao));
 }
+
+/* ------------------------------------------------------------------ */
+/* Campaigns (AI batch dialer)                                         */
+/* ------------------------------------------------------------------ */
+
+export interface Campaign {
+  id: string;
+  name: string;
+  vapiCampaignId: string | null;
+  status: string;
+  totalContacts: number;
+  maxConcurrency: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CampaignRow {
+  id: string;
+  user_id: string;
+  name: string | null;
+  vapi_campaign_id: string | null;
+  status: string | null;
+  total_contacts: number | null;
+  max_concurrency: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toCampaign(r: CampaignRow): Campaign {
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    vapiCampaignId: r.vapi_campaign_id,
+    status: r.status ?? "draft",
+    totalContacts: r.total_contacts ?? 0,
+    maxConcurrency: r.max_concurrency ?? 1,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export interface CampaignContact {
+  id: string;
+  campaignId: string;
+  leadId: string | null;
+  phone: string;
+  name: string;
+  status: string;
+  callLogId: string | null;
+  createdAt: string;
+}
+
+interface CampaignContactRow {
+  id: string;
+  campaign_id: string;
+  lead_id: string | null;
+  phone: string | null;
+  name: string | null;
+  status: string | null;
+  call_log_id: string | null;
+  created_at: string;
+}
+
+function toCampaignContact(r: CampaignContactRow): CampaignContact {
+  return {
+    id: r.id,
+    campaignId: r.campaign_id,
+    leadId: r.lead_id,
+    phone: r.phone ?? "",
+    name: r.name ?? "",
+    status: r.status ?? "queued",
+    callLogId: r.call_log_id,
+    createdAt: r.created_at,
+  };
+}
+
+export async function getCampaigns(): Promise<Campaign[]> {
+  const { data, error } = await sb()
+    .from("campaigns")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) dbError("Failed to load campaigns", error);
+  return ((data ?? []) as CampaignRow[]).map(toCampaign);
+}
+
+export async function getCampaign(id: string): Promise<Campaign | null> {
+  const { data, error } = await sb()
+    .from("campaigns")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) return null;
+  return toCampaign(data as CampaignRow);
+}
+
+export async function getCampaignContacts(
+  campaignId: string
+): Promise<CampaignContact[]> {
+  const { data, error } = await sb()
+    .from("campaign_contacts")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .order("created_at", { ascending: true });
+  if (error) dbError("Failed to load campaign contacts", error);
+  return ((data ?? []) as CampaignContactRow[]).map(toCampaignContact);
+}
+
+/* ------------------------------------------------------------------ */
+/* Profiles (subscription + per-user Vapi keys)                        */
+/* ------------------------------------------------------------------ */
+
+export interface Profile {
+  id: string;
+  email: string;
+  fullName: string;
+  stripeCustomerId: string | null;
+  subscriptionStatus: string;
+  vapiApiKey: string | null;
+  vapiAssistantId: string | null;
+  vapiPhoneNumberId: string | null;
+  createdAt: string;
+}
+
+interface ProfileRow {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  stripe_customer_id: string | null;
+  subscription_status: string | null;
+  vapi_api_key: string | null;
+  vapi_assistant_id: string | null;
+  vapi_phone_number_id: string | null;
+  created_at: string;
+}
+
+function toProfile(r: ProfileRow): Profile {
+  return {
+    id: r.id,
+    email: r.email ?? "",
+    fullName: r.full_name ?? "",
+    stripeCustomerId: r.stripe_customer_id,
+    subscriptionStatus: r.subscription_status ?? "",
+    vapiApiKey: r.vapi_api_key,
+    vapiAssistantId: r.vapi_assistant_id,
+    vapiPhoneNumberId: r.vapi_phone_number_id,
+    createdAt: r.created_at,
+  };
+}
+
+export async function getProfile(): Promise<Profile | null> {
+  const userId = await requireUserId();
+  const { data, error } = await sb()
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+  if (error) return null;
+  return toProfile(data as ProfileRow);
+}
+
+/** Save (or clear, with nulls) the user's own Vapi credentials. */
+export async function updateVapiKeys(keys: {
+  apiKey?: string | null;
+  assistantId?: string | null;
+  phoneNumberId?: string | null;
+}): Promise<void> {
+  const userId = await requireUserId();
+  const row: Record<string, string | null> = {};
+  if (keys.apiKey !== undefined) row.vapi_api_key = keys.apiKey || null;
+  if (keys.assistantId !== undefined)
+    row.vapi_assistant_id = keys.assistantId || null;
+  if (keys.phoneNumberId !== undefined)
+    row.vapi_phone_number_id = keys.phoneNumberId || null;
+  const { error } = await sb().from("profiles").update(row).eq("id", userId);
+  if (error) dbError("Failed to save Vapi keys", error);
+}
+
+const TRIAL_DAYS = 14;
+
+/**
+ * Whether the user may access the app: active/trialing subscription, or
+ * still inside the 14-day free trial (and not canceled/past_due/unpaid).
+ */
+export function hasActiveAccess(profile: Profile | null): boolean {
+  if (!profile) return false;
+  const s = (profile.subscriptionStatus || "").toLowerCase();
+  if (s === "active" || s === "trialing") return true;
+  if (s === "canceled" || s === "cancelled" || s === "past_due" || s === "unpaid")
+    return false;
+  const ageMs = Date.now() - new Date(profile.createdAt).getTime();
+  return ageMs < TRIAL_DAYS * 24 * 3600 * 1000;
+}
+
+export function vapiConnected(profile: Profile | null): boolean {
+  return !!(
+    profile?.vapiApiKey &&
+    profile?.vapiAssistantId &&
+    profile?.vapiPhoneNumberId
+  );
+}

@@ -35,15 +35,43 @@ export async function POST(req: Request) {
 
   const call = msg.call ?? {};
   const meta = { ...(call.metadata ?? {}), ...(msg.metadata ?? {}) };
-  const callLogId: string | undefined = meta.wholesaleOsCallLogId;
-  const leadId: string | undefined = meta.wholesaleOsLeadId;
-  const userId: string | undefined = meta.wholesaleOsUserId;
-  if (!callLogId) return NextResponse.json({ received: true });
+  let callLogId: string | undefined = meta.wholesaleOsCallLogId;
+  let leadId: string | undefined = meta.wholesaleOsLeadId;
+  let userId: string | undefined = meta.wholesaleOsUserId;
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL as string,
     process.env.SUPABASE_SERVICE_ROLE_KEY as string
   );
+
+  // Fallback for batch-campaign calls: Vapi campaign dials may not carry our
+  // per-call metadata, so match the most recent open call log for this user
+  // by the dialed phone number instead.
+  if (!callLogId) {
+    const dialed = String(
+      call?.customer?.number ?? msg?.customer?.number ?? ""
+    ).replace(/\D/g, "");
+    const tail = dialed.slice(-10);
+    if (tail.length === 10 && userId) {
+      const { data: openLogs } = await supabase
+        .from("call_logs")
+        .select("id, lead_id, user_id, phone")
+        .eq("user_id", userId)
+        .in("status", ["queued", "initiated", "ringing", "in-progress"])
+        .order("created_at", { ascending: false })
+        .limit(50);
+      const match = (openLogs ?? []).find((r: any) =>
+        String(r.phone || "").replace(/\D/g, "").endsWith(tail)
+      ) as any;
+      if (match) {
+        callLogId = match.id;
+        leadId = match.lead_id ?? leadId;
+        userId = match.user_id ?? userId;
+      }
+    }
+  }
+
+  if (!callLogId) return NextResponse.json({ received: true });
 
   const durationSeconds = Math.round(
     msg.durationSeconds ?? (msg.durationMs ? msg.durationMs / 1000 : 0)
@@ -68,6 +96,12 @@ export async function POST(req: Request) {
       outcome,
     })
     .eq("id", callLogId);
+
+  // If this call belonged to a batch campaign, mark its audience row done.
+  await supabase
+    .from("campaign_contacts")
+    .update({ status: "completed" })
+    .eq("call_log_id", callLogId);
 
   // Advance the pipeline on positive signals only.
   const o = outcome.toLowerCase();

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 
@@ -70,6 +71,7 @@ export default function ContractsPage() {
   };
 
   return (
+    <SubscriptionGate>
     <div className="min-h-screen bg-slate-950">
       <Sidebar />
       <main className="ml-64 min-h-screen p-6">
@@ -112,5 +114,6 @@ export default function ContractsPage() {
         </div>
       </main>
     </div>
+    </SubscriptionGate>
   );
 }

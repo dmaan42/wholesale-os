@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import { calculateMAO } from "@/lib/db";
 import { formatCurrency } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -27,6 +28,7 @@ export default function AnalyzerPage() {
   const buyerProfit = arv - repairs - holding - closing - offerPrice - assignmentFee;
 
   return (
+    <SubscriptionGate>
     <div className="min-h-screen bg-slate-950">
       <Sidebar />
       <main className="ml-64 min-h-screen p-6">
@@ -107,5 +109,6 @@ export default function AnalyzerPage() {
         </div>
       </main>
     </div>
+    </SubscriptionGate>
   );
 }

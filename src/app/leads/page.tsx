@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import SubscriptionGate from "@/components/SubscriptionGate";
 import LeadModal from "@/components/LeadModal";
 import { Lead, PIPELINE_STAGES } from "@/lib/types";
 import { getLeads, addLead, updateLead, deleteLead } from "@/lib/db";
@@ -70,6 +71,7 @@ export default function LeadsPage() {
   };
 
   return (
+    <SubscriptionGate>
     <div className="min-h-screen bg-slate-950">
       <Sidebar />
       <main className="ml-64 min-h-screen p-6">
@@ -180,5 +182,6 @@ export default function LeadsPage() {
         }}
       />
     </div>
+    </SubscriptionGate>
   );
 }
