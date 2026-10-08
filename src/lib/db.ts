@@ -325,3 +325,109 @@ export function calculateMAO(
   const mao = arv * 0.7 - repairs - holding - closing - desiredProfit;
   return Math.max(0, Math.round(mao));
 }
+
+/* ------------------------------------------------------------------ */
+/* Campaigns (AI batch dialer)                                         */
+/* ------------------------------------------------------------------ */
+
+export interface Campaign {
+  id: string;
+  name: string;
+  vapiCampaignId: string | null;
+  status: string;
+  totalContacts: number;
+  maxConcurrency: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CampaignRow {
+  id: string;
+  user_id: string;
+  name: string | null;
+  vapi_campaign_id: string | null;
+  status: string | null;
+  total_contacts: number | null;
+  max_concurrency: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toCampaign(r: CampaignRow): Campaign {
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    vapiCampaignId: r.vapi_campaign_id,
+    status: r.status ?? "draft",
+    totalContacts: r.total_contacts ?? 0,
+    maxConcurrency: r.max_concurrency ?? 1,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export interface CampaignContact {
+  id: string;
+  campaignId: string;
+  leadId: string | null;
+  phone: string;
+  name: string;
+  status: string;
+  callLogId: string | null;
+  createdAt: string;
+}
+
+interface CampaignContactRow {
+  id: string;
+  campaign_id: string;
+  lead_id: string | null;
+  phone: string | null;
+  name: string | null;
+  status: string | null;
+  call_log_id: string | null;
+  created_at: string;
+}
+
+function toCampaignContact(r: CampaignContactRow): CampaignContact {
+  return {
+    id: r.id,
+    campaignId: r.campaign_id,
+    leadId: r.lead_id,
+    phone: r.phone ?? "",
+    name: r.name ?? "",
+    status: r.status ?? "queued",
+    callLogId: r.call_log_id,
+    createdAt: r.created_at,
+  };
+}
+
+export async function getCampaigns(): Promise<Campaign[]> {
+  const { data, error } = await sb()
+    .from("campaigns")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) dbError("Failed to load campaigns", error);
+  return ((data ?? []) as CampaignRow[]).map(toCampaign);
+}
+
+export async function getCampaign(id: string): Promise<Campaign | null> {
+  const { data, error } = await sb()
+    .from("campaigns")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) return null;
+  return toCampaign(data as CampaignRow);
+}
+
+export async function getCampaignContacts(
+  campaignId: string
+): Promise<CampaignContact[]> {
+  const { data, error } = await sb()
+    .from("campaign_contacts")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .order("created_at", { ascending: true });
+  if (error) dbError("Failed to load campaign contacts", error);
+  return ((data ?? []) as CampaignContactRow[]).map(toCampaignContact);
+}
