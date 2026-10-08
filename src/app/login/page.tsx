@@ -6,13 +6,14 @@ import { getSupabase } from "@/lib/supabase";
 import Link from "next/link";
 
 function LoginForm() {
-  const [mode, setMode] = useState<"signin" | "signup">("signup");
+  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [checkEmail, setCheckEmail] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
 
   const startCheckout = async (): Promise<boolean> => {
@@ -34,6 +35,15 @@ function LoginForm() {
     setError("");
     setLoading(true);
     try {
+      if (mode === "reset") {
+        if (!email.trim()) throw new Error("Enter your email address.");
+        const { error } = await getSupabase().auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (error) throw error;
+        setResetSent(true);
+        return;
+      }
       if (mode === "signup") {
         if (!name.trim() || !email.trim() || password.length < 6) {
           throw new Error("Enter your name, a valid email, and a password of 6+ characters.");
@@ -67,6 +77,30 @@ function LoginForm() {
     }
   };
 
+  if (resetSent) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center">
+          <div className="mb-4 text-4xl">📬</div>
+          <h2 className="mb-2 text-xl font-bold text-white">Check your email</h2>
+          <p className="text-sm text-slate-400">
+            We sent a password reset link to <span className="text-white">{email}</span>.
+            Click it to choose a new password.
+          </p>
+          <button
+            onClick={() => {
+              setResetSent(false);
+              setMode("signin");
+            }}
+            className="mt-6 w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-500"
+          >
+            Back to Sign In →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (checkEmail) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
@@ -99,10 +133,26 @@ function LoginForm() {
             <span className="text-2xl font-bold text-white">WholesaleOS</span>
           </Link>
           <p className="mt-2 text-slate-400">
-            {mode === "signup" ? "Start your WholesaleOS subscription" : "Welcome back"}
+            {mode === "signup"
+              ? "Start your WholesaleOS subscription"
+              : mode === "signin"
+                ? "Welcome back"
+                : "Reset your password"}
           </p>
         </div>
 
+        {mode === "reset" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setMode("signin");
+              setError("");
+            }}
+            className="mb-4 text-sm text-slate-400 hover:text-white"
+          >
+            ← Back to Sign In
+          </button>
+        ) : (
         <div className="mb-4 grid grid-cols-2 rounded-xl border border-slate-800 bg-slate-900 p-1">
           {(["signup", "signin"] as const).map((m) => (
             <button
@@ -120,6 +170,7 @@ function LoginForm() {
             </button>
           ))}
         </div>
+        )}
 
         <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-800 bg-slate-900 p-8">
           {mode === "signup" && (
@@ -145,6 +196,7 @@ function LoginForm() {
               required
             />
           </div>
+          {mode !== "reset" && (
           <div className="mb-6">
             <label className="mb-1.5 block text-sm text-slate-300">Password</label>
             <input
@@ -157,6 +209,13 @@ function LoginForm() {
               minLength={6}
             />
           </div>
+          )}
+          {mode === "reset" && (
+            <p className="mb-6 text-sm text-slate-400">
+              Enter the email you signed up with and we&apos;ll send you a link to
+              choose a new password.
+            </p>
+          )}
           {error && (
             <p className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
               {error}
@@ -171,8 +230,24 @@ function LoginForm() {
               ? "Please wait..."
               : mode === "signup"
                 ? "Create Account & Start Trial →"
-                : "Sign In →"}
+                : mode === "reset"
+                  ? "Send Reset Link →"
+                  : "Sign In →"}
           </button>
+          {mode === "signin" && (
+            <p className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("reset");
+                  setError("");
+                }}
+                className="text-sm text-slate-400 hover:text-white"
+              >
+                Forgot password?
+              </button>
+            </p>
+          )}
           {mode === "signup" && (
             <p className="mt-4 text-center text-xs text-slate-500">
               $197/mo after trial · Cancel anytime · Secure checkout by Stripe
