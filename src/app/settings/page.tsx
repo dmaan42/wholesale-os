@@ -7,7 +7,10 @@ import { useRouter } from "next/navigation";
 import {
   getProfile,
   updateBlandKeys,
+  updateBatchDataKey,
+  getSkipTraceUsageThisMonth,
   blandConnected,
+  batchdataConnected,
   hasActiveAccess,
   type Profile,
 } from "@/lib/db";
@@ -49,6 +52,12 @@ export default function SettingsPage() {
   const [blandSaving, setBlandSaving] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
+  // BatchData form state
+  const [batchKey, setBatchKey] = useState("");
+  const [batchMsg, setBatchMsg] = useState("");
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [usage, setUsage] = useState<{ traces: number; costCents: number } | null>(null);
+
   useEffect(() => {
     if (!loading && !user) {
       router.push("/login");
@@ -68,8 +77,10 @@ export default function SettingsPage() {
           setProfile(p);
           setApiKey(p?.blandApiKey ?? "");
           setFromNumber(p?.blandFromNumber ?? "");
+          setBatchKey(p?.batchdataApiKey ?? "");
         })
         .catch(() => {});
+      getSkipTraceUsageThisMonth().then(setUsage).catch(() => {});
     }
   }, [user]);
 
@@ -89,6 +100,7 @@ export default function SettingsPage() {
     "Account";
 
   const connected = blandConnected(profile);
+  const batchConnected = batchdataConnected(profile);
   const access = hasActiveAccess(profile);
 
   const startCheckout = async () => {
@@ -130,6 +142,41 @@ export default function SettingsPage() {
       setBlandMsg(e.message || "Save failed");
     } finally {
       setBlandSaving(false);
+    }
+  };
+
+  const saveBatchData = async () => {
+    setBatchMsg("");
+    if (!batchKey.trim()) {
+      setBatchMsg("Paste your BatchData API key first.");
+      return;
+    }
+    setBatchSaving(true);
+    try {
+      await updateBatchDataKey(batchKey.trim());
+      const p = await getProfile();
+      setProfile(p);
+      setBatchMsg("✓ BatchData account connected.");
+    } catch (e: any) {
+      setBatchMsg(e.message || "Save failed");
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const disconnectBatchData = async () => {
+    if (!window.confirm("Disconnect your BatchData account? Skip tracing will stop working until you reconnect.")) return;
+    setBatchSaving(true);
+    try {
+      await updateBatchDataKey(null);
+      setBatchKey("");
+      const p = await getProfile();
+      setProfile(p);
+      setBatchMsg("BatchData account disconnected.");
+    } catch (e: any) {
+      setBatchMsg(e.message || "Disconnect failed");
+    } finally {
+      setBatchSaving(false);
     }
   };
 
@@ -276,6 +323,69 @@ export default function SettingsPage() {
             <p className="mt-3 text-xs text-slate-500">
               New to Bland AI? Sign up at bland.ai, grab a phone number, then
               paste your API key and caller ID number above.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-xl">🔍</span>
+              <h2 className="text-lg font-semibold">Data & Skip Tracing (BatchData)</h2>
+            </div>
+            <p className="mb-4 text-sm text-slate-400">
+              Connect your own BatchData account to skip trace leads right from
+              the CRM. Lookups are billed to{" "}
+              <span className="font-semibold text-white">your</span> BatchData
+              account — never shared with other users.{" "}
+              <span
+                className={`font-semibold ${batchConnected ? "text-emerald-400" : "text-amber-400"}`}
+              >
+                {batchConnected ? "● Connected" : "○ Not connected"}
+              </span>
+            </p>
+            {usage && (
+              <p className="mb-4 text-sm text-slate-400">
+                This month:{" "}
+                <span className="font-semibold text-white">{usage.traces}</span>{" "}
+                traces ·{" "}
+                <span className="font-semibold text-white">
+                  ${(usage.costCents / 100).toFixed(2)}
+                </span>{" "}
+                estimated
+              </p>
+            )}
+            <div>
+              <label className="text-xs text-slate-500">BatchData API key</label>
+              <input
+                type="password"
+                value={batchKey}
+                onChange={(e) => setBatchKey(e.target.value)}
+                placeholder="API key from batchdata.com dashboard"
+                className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
+              />
+            </div>
+            {batchMsg && <p className="mt-3 text-sm text-slate-300">{batchMsg}</p>}
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={saveBatchData}
+                disabled={batchSaving}
+                className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {batchSaving ? "Saving…" : batchConnected ? "Update connection" : "Connect BatchData"}
+              </button>
+              {batchConnected && (
+                <button
+                  onClick={disconnectBatchData}
+                  disabled={batchSaving}
+                  className="rounded-lg border border-red-500/40 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  Disconnect
+                </button>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              New to BatchData? Sign up at batchdata.com, grab an API key, then
+              paste it above. Each skip trace bills your BatchData account
+              per matched record.
             </p>
           </div>
 
