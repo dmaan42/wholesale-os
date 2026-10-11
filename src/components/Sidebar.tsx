@@ -12,7 +12,7 @@ const navItems = [
   { href: "/analyzer", label: "Deal Analyzer", icon: "🧮" },
   { href: "/buyers", label: "Cash Buyers", icon: "🏢" },
   { href: "/contracts", label: "Contracts", icon: "📄" },
-  { href: "/settings", label: "Subscription", icon: "⚙️" },
+  { href: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
 export default function Sidebar() {

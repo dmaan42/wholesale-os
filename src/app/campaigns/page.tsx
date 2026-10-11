@@ -294,8 +294,6 @@ export default function CampaignsPage() {
               <p className="mt-3 text-xs text-slate-500">
                 Only include leads you are allowed to auto-dial. You are
                 responsible for consent, do-not-call, and calling-hour rules.
-                Note: Vapi free numbers can&apos;t run campaigns — use a paid
-                Vapi number.
               </p>
 
               {error && <p className="mt-3 text-sm text-red-400">{error}</p>}

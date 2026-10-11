@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireActiveSubscription } from "@/lib/api-auth";
-import { resolveVapiCreds, createVapiCall } from "@/lib/vapi";
+import { resolveBlandCreds, createBlandCall, toE164 } from "@/lib/bland";
 
 export const runtime = "nodejs";
 
 // POST /api/dial  { leadId, phone }
 // Verifies the caller is a signed-in WholesaleOS user, logs the call, then
-// places an outbound AI call through the CALLER'S OWN Vapi account
-// (connected in Settings → AI Calling). Usage is billed to their Vapi
+// places an outbound AI call through the CALLER'S OWN Bland AI account
+// (connected in Settings → AI Calling). Usage is billed to their Bland
 // account, never to the app owner's.
-// Call outcomes arrive later at /api/voice-webhook and update the call log +
+// Call outcomes arrive later at /api/bland-webhook and update the call log +
 // pipeline stage automatically.
 //
-// Required: the user must have connected Vapi in Settings.
+// Required: the user must have connected Bland in Settings.
 export async function POST(req: Request) {
   try {
     const { leadId, phone } = await req.json();
@@ -48,17 +48,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // The caller's own Vapi credentials — billed to their account.
+    // The caller's own Bland credentials — billed to their account.
     let creds;
     try {
-      creds = await resolveVapiCreds(supabase, user.id);
+      creds = await resolveBlandCreds(supabase, user.id);
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 503 });
     }
 
+    const e164 = toE164(phone);
+    if (!e164) {
+      return NextResponse.json(
+        { error: "Phone number is not dialable." },
+        { status: 400 }
+      );
+    }
+
     const { data: lead, error: leadErr } = await supabase
       .from("leads")
-      .select("id, owner_name")
+      .select("id, owner_name, city, address")
       .eq("id", leadId)
       .single();
     if (leadErr || !lead) {
@@ -74,7 +82,7 @@ export async function POST(req: Request) {
         phone,
         direction: "outbound",
         status: "initiated",
-        provider: "vapi",
+        provider: "bland",
       })
       .select()
       .single();
@@ -82,38 +90,50 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not log call" }, { status: 500 });
     }
 
-    const vapiData = await createVapiCall(creds, {
-      customerNumber: phone,
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "https://www.realestatesolutionz.com";
+    const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
+    const webhookUrl =
+      `${appUrl}/api/bland-webhook` +
+      (webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : "");
+
+    const blandData = await createBlandCall(creds, {
+      customerNumber: e164,
       customerName: lead.owner_name || undefined,
+      contactCity: (lead as any).city || undefined,
+      propertyAddress: (lead as any).address || undefined,
+      webhookUrl,
       metadata: {
         wholesaleOsLeadId: leadId,
         wholesaleOsUserId: user.id,
         wholesaleOsCallLogId: log.id,
       },
-    }).catch((e: any) => ({ __vapiError: e.message || "Voice provider error" }));
-    if ((vapiData as any).__vapiError) {
+      externalId: `wholesaleos-${log.id}`,
+    }).catch((e: any) => ({ __blandError: e.message || "Voice provider error" }));
+
+    if ((blandData as any).__blandError) {
       await supabase
         .from("call_logs")
         .update({
           status: "failed",
-          summary: `Provider error: ${(vapiData as any).__vapiError}`,
+          summary: `Provider error: ${(blandData as any).__blandError}`,
         })
         .eq("id", log.id);
       return NextResponse.json(
-        { error: (vapiData as any).__vapiError },
+        { error: (blandData as any).__blandError },
         { status: 502 }
       );
     }
 
     await supabase
       .from("call_logs")
-      .update({ status: "ringing", provider_call_id: vapiData.id })
+      .update({ status: "ringing", provider_call_id: blandData.call_id })
       .eq("id", log.id);
 
     return NextResponse.json({
       ok: true,
       callLogId: log.id,
-      providerCallId: vapiData.id,
+      providerCallId: blandData.call_id,
     });
   } catch (err: any) {
     return NextResponse.json(

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
-import { createVapiCampaign, toE164, resolveVapiCreds } from "@/lib/vapi";
+import {
+  dispatchBlandCalls,
+  toE164,
+  resolveBlandCreds,
+} from "@/lib/bland";
 
 export const runtime = "nodejs";
 
@@ -22,12 +26,12 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/campaigns — create + immediately launch a Vapi batch campaign.
-// Body: { name, leadIds: string[], maxConcurrency?: number,
-//         earliestAt?: string (ISO), latestAt?: string (ISO) }
-// Campaigns launch on creation (Vapi behavior) unless earliestAt is future.
+// POST /api/campaigns — create + immediately launch a Bland batch campaign.
+// Body: { name, leadIds: string[], maxConcurrency?: number }
+// Bland has no native "campaign" object in v1, so we dispatch individual
+// calls with concurrency control and track them via our own campaign row.
 export async function POST(req: Request) {
-  // Track rows we inserted so we can roll back if the Vapi launch fails.
+  // Track rows we inserted so we can roll back if the launch fails.
   let campaignId: string | null = null;
   let supabase: Awaited<ReturnType<typeof requireApiUser>>["supabase"] | null =
     null;
@@ -40,15 +44,15 @@ export async function POST(req: Request) {
     // Paywall: launching campaigns requires an active subscription or trial.
     await requireActiveSubscription(supabase, user.id);
 
-    // The caller's own Vapi credentials — billed to their account.
-    // Throws a user-actionable error when Vapi isn't connected.
-    const creds = await resolveVapiCreds(supabase, user.id);
+    // The caller's own Bland credentials — billed to their account.
+    // Throws a user-actionable error when Bland isn't connected.
+    const creds = await resolveBlandCreds(supabase, user.id);
 
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "Untitled campaign").slice(0, 120);
     const leadIds: string[] = Array.isArray(body.leadIds) ? body.leadIds : [];
     const maxConcurrency = Math.min(
-      Math.max(Number(body.maxConcurrency) || 1, 1),
+      Math.max(Number(body.maxConcurrency) || 2, 1),
       10
     );
 
@@ -68,13 +72,19 @@ export async function POST(req: Request) {
     // Load the user's leads and keep only ones with dialable numbers.
     const { data: leads, error: leadsErr } = await supabase
       .from("leads")
-      .select("id, owner_name, phone")
+      .select("id, owner_name, phone, city, address")
       .eq("user_id", user.id)
       .in("id", leadIds);
     if (leadsErr) throw leadsErr;
 
     const seen = new Set<string>();
-    const audience: { leadId: string; phone: string; name: string }[] = [];
+    const audience: {
+      leadId: string;
+      phone: string;
+      name: string;
+      city?: string;
+      address?: string;
+    }[] = [];
     for (const lead of leads ?? []) {
       const e164 = toE164(lead.phone || "");
       if (!e164 || seen.has(e164)) continue; // skip bad + duplicate numbers
@@ -83,6 +93,8 @@ export async function POST(req: Request) {
         leadId: lead.id,
         phone: e164,
         name: lead.owner_name || "",
+        city: (lead as any).city || undefined,
+        address: (lead as any).address || undefined,
       });
     }
     if (audience.length === 0) {
@@ -92,7 +104,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1) Our campaign row (draft until Vapi confirms the launch).
+    // 1) Our campaign row (draft until Bland confirms the launch).
     const { data: campaign, error: campErr } = await supabase
       .from("campaigns")
       .insert({
@@ -101,6 +113,7 @@ export async function POST(req: Request) {
         status: "draft",
         total_contacts: audience.length,
         max_concurrency: maxConcurrency,
+        provider: "bland",
       })
       .select()
       .single();
@@ -134,7 +147,7 @@ export async function POST(req: Request) {
           phone: a.phone,
           direction: "outbound",
           status: "queued",
-          provider: "vapi",
+          provider: "bland",
         }))
       )
       .select("id, lead_id");
@@ -155,47 +168,88 @@ export async function POST(req: Request) {
         .eq("lead_id", a.leadId);
     }
 
-    // 4) Launch on Vapi. This is the point of no return for real calls —
-    //    a timeout/5xx here does NOT prove failure, so we verify by reading
-    //    the campaign back before claiming success (see vapi.ts notes).
-    const vapiCampaign = await createVapiCampaign(creds, {
-      name,
-      customers: audience.map((a) => ({ number: a.phone, name: a.name })),
-      maxConcurrency,
-      earliestAt: body.earliestAt || undefined,
-      latestAt: body.latestAt || undefined,
-      metadata: {
-        wholesaleOsUserId: user.id,
-        wholesaleOsCampaignId: cid,
-      },
-    });
+    // 4) Dispatch via Bland. This is the point of no return for real calls.
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "https://www.realestatesolutionz.com";
+    const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
+    const webhookUrl =
+      `${appUrl}/api/bland-webhook` +
+      (webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : "");
 
-    const { error: updErr } = await supabase
+    // Mark campaign as running before dispatch so the UI reflects it.
+    await supabase
       .from("campaigns")
-      .update({
-        vapi_campaign_id: vapiCampaign.id,
-        status: "running",
-        updated_at: new Date().toISOString(),
-      })
+      .update({ status: "running", updated_at: new Date().toISOString() })
       .eq("id", campaignId);
-    if (updErr) throw updErr;
+
+    const { placed, failed } = await dispatchBlandCalls(
+      creds,
+      audience.map((a) => ({
+        phone_number: a.phone,
+        metadata: {
+          wholesaleOsLeadId: a.leadId,
+          wholesaleOsUserId: user.id,
+          wholesaleOsCampaignId: cid,
+          wholesaleOsCallLogId: logByLead.get(a.leadId) ?? "",
+        },
+        external_id: `wholesaleos-${logByLead.get(a.leadId) ?? a.leadId}`,
+      })),
+      {
+        webhookUrl,
+        maxConcurrency,
+        onCallPlaced: async (index, callId) => {
+          const a = audience[index];
+          const logId = logByLead.get(a.leadId);
+          if (!logId || !supabase) return;
+          await supabase
+            .from("call_logs")
+            .update({ status: "ringing", provider_call_id: callId })
+            .eq("id", logId);
+          await supabase
+            .from("campaign_contacts")
+            .update({ status: "dialing" })
+            .eq("campaign_id", cid)
+            .eq("lead_id", a.leadId);
+        },
+        onCallFailed: async (index, error) => {
+          const a = audience[index];
+          const logId = logByLead.get(a.leadId);
+          if (!logId || !supabase) return;
+          await supabase
+            .from("call_logs")
+            .update({ status: "failed", summary: `Provider error: ${error}` })
+            .eq("id", logId);
+          await supabase
+            .from("campaign_contacts")
+            .update({ status: "failed" })
+            .eq("campaign_id", cid)
+            .eq("lead_id", a.leadId);
+        },
+      }
+    );
+
+    // If every call failed to dispatch, mark the campaign failed.
+    if (placed === 0 && failed > 0) {
+      await supabase
+        .from("campaigns")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", campaignId);
+    }
 
     return NextResponse.json({
       ok: true,
       campaignId,
-      vapiCampaignId: vapiCampaign.id,
-      launched: audience.length,
+      launched: placed,
+      failed,
     });
   } catch (err: any) {
     // Roll back our rows so a failed launch leaves no orphan campaign.
-    // (If Vapi actually created the campaign despite the error, the user
-    // can cancel it from the Vapi dashboard — we never auto-retry a launch.)
     if (supabase && campaignId) {
       await supabase.from("call_logs").delete().eq("campaign_id", campaignId);
       await supabase.from("campaign_contacts").delete().eq("campaign_id", campaignId);
       await supabase.from("campaigns").delete().eq("id", campaignId);
     }
-    const status = err.status || (err.vapiStatus ? 502 : 500);
+    const status = err.status || (err.blandStatus ? 502 : 500);
     return NextResponse.json(
       { error: err.message || "Campaign launch failed" },
       { status }
