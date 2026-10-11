@@ -442,9 +442,8 @@ export interface Profile {
   fullName: string;
   stripeCustomerId: string | null;
   subscriptionStatus: string;
-  vapiApiKey: string | null;
-  vapiAssistantId: string | null;
-  vapiPhoneNumberId: string | null;
+  blandApiKey: string | null;
+  blandFromNumber: string | null;
   createdAt: string;
 }
 
@@ -454,9 +453,8 @@ interface ProfileRow {
   full_name: string | null;
   stripe_customer_id: string | null;
   subscription_status: string | null;
-  vapi_api_key: string | null;
-  vapi_assistant_id: string | null;
-  vapi_phone_number_id: string | null;
+  bland_api_key: string | null;
+  bland_from_number: string | null;
   created_at: string;
 }
 
@@ -467,9 +465,8 @@ function toProfile(r: ProfileRow): Profile {
     fullName: r.full_name ?? "",
     stripeCustomerId: r.stripe_customer_id,
     subscriptionStatus: r.subscription_status ?? "",
-    vapiApiKey: r.vapi_api_key,
-    vapiAssistantId: r.vapi_assistant_id,
-    vapiPhoneNumberId: r.vapi_phone_number_id,
+    blandApiKey: r.bland_api_key,
+    blandFromNumber: r.bland_from_number,
     createdAt: r.created_at,
   };
 }
@@ -485,21 +482,18 @@ export async function getProfile(): Promise<Profile | null> {
   return toProfile(data as ProfileRow);
 }
 
-/** Save (or clear, with nulls) the user's own Vapi credentials. */
-export async function updateVapiKeys(keys: {
+/** Save (or clear, with nulls) the user's own Bland credentials. */
+export async function updateBlandKeys(keys: {
   apiKey?: string | null;
-  assistantId?: string | null;
-  phoneNumberId?: string | null;
+  fromNumber?: string | null;
 }): Promise<void> {
   const userId = await requireUserId();
   const row: Record<string, string | null> = {};
-  if (keys.apiKey !== undefined) row.vapi_api_key = keys.apiKey || null;
-  if (keys.assistantId !== undefined)
-    row.vapi_assistant_id = keys.assistantId || null;
-  if (keys.phoneNumberId !== undefined)
-    row.vapi_phone_number_id = keys.phoneNumberId || null;
+  if (keys.apiKey !== undefined) row.bland_api_key = keys.apiKey || null;
+  if (keys.fromNumber !== undefined)
+    row.bland_from_number = keys.fromNumber || null;
   const { error } = await sb().from("profiles").update(row).eq("id", userId);
-  if (error) dbError("Failed to save Vapi keys", error);
+  if (error) dbError("Failed to save Bland keys", error);
 }
 
 const TRIAL_DAYS = 14;
@@ -518,10 +512,9 @@ export function hasActiveAccess(profile: Profile | null): boolean {
   return ageMs < TRIAL_DAYS * 24 * 3600 * 1000;
 }
 
-export function vapiConnected(profile: Profile | null): boolean {
-  return !!(
-    profile?.vapiApiKey &&
-    profile?.vapiAssistantId &&
-    profile?.vapiPhoneNumberId
-  );
+export function blandConnected(profile: Profile | null): boolean {
+  return !!(profile?.blandApiKey && profile?.blandFromNumber);
 }
+
+/** @deprecated Use blandConnected instead. Kept for backwards compat. */
+export const vapiConnected = blandConnected;

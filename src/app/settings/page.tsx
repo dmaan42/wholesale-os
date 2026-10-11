@@ -6,8 +6,8 @@ import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import {
   getProfile,
-  updateVapiKeys,
-  vapiConnected,
+  updateBlandKeys,
+  blandConnected,
   hasActiveAccess,
   type Profile,
 } from "@/lib/db";
@@ -42,12 +42,11 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // Vapi form state
+  // Bland form state
   const [apiKey, setApiKey] = useState("");
-  const [assistantId, setAssistantId] = useState("");
-  const [phoneNumberId, setPhoneNumberId] = useState("");
-  const [vapiMsg, setVapiMsg] = useState("");
-  const [vapiSaving, setVapiSaving] = useState(false);
+  const [fromNumber, setFromNumber] = useState("");
+  const [blandMsg, setBlandMsg] = useState("");
+  const [blandSaving, setBlandSaving] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   useEffect(() => {
@@ -67,9 +66,8 @@ export default function SettingsPage() {
       getProfile()
         .then((p) => {
           setProfile(p);
-          setApiKey(p?.vapiApiKey ?? "");
-          setAssistantId(p?.vapiAssistantId ?? "");
-          setPhoneNumberId(p?.vapiPhoneNumberId ?? "");
+          setApiKey(p?.blandApiKey ?? "");
+          setFromNumber(p?.blandFromNumber ?? "");
         })
         .catch(() => {});
     }
@@ -90,7 +88,7 @@ export default function SettingsPage() {
     user.email?.split("@")[0] ||
     "Account";
 
-  const connected = vapiConnected(profile);
+  const connected = blandConnected(profile);
   const access = hasActiveAccess(profile);
 
   const startCheckout = async () => {
@@ -113,44 +111,42 @@ export default function SettingsPage() {
     }
   };
 
-  const saveVapi = async () => {
-    setVapiMsg("");
-    if (!apiKey.trim() || !assistantId.trim() || !phoneNumberId.trim()) {
-      setVapiMsg("Fill in all three fields.");
+  const saveBland = async () => {
+    setBlandMsg("");
+    if (!apiKey.trim() || !fromNumber.trim()) {
+      setBlandMsg("Fill in both fields.");
       return;
     }
-    setVapiSaving(true);
+    setBlandSaving(true);
     try {
-      await updateVapiKeys({
+      await updateBlandKeys({
         apiKey: apiKey.trim(),
-        assistantId: assistantId.trim(),
-        phoneNumberId: phoneNumberId.trim(),
+        fromNumber: fromNumber.trim(),
       });
       const p = await getProfile();
       setProfile(p);
-      setVapiMsg("✓ Vapi account connected.");
+      setBlandMsg("✓ Bland AI account connected.");
     } catch (e: any) {
-      setVapiMsg(e.message || "Save failed");
+      setBlandMsg(e.message || "Save failed");
     } finally {
-      setVapiSaving(false);
+      setBlandSaving(false);
     }
   };
 
-  const disconnectVapi = async () => {
-    if (!window.confirm("Disconnect your Vapi account? The dialer and campaigns will stop working until you reconnect.")) return;
-    setVapiSaving(true);
+  const disconnectBland = async () => {
+    if (!window.confirm("Disconnect your Bland AI account? The dialer and campaigns will stop working until you reconnect.")) return;
+    setBlandSaving(true);
     try {
-      await updateVapiKeys({ apiKey: null, assistantId: null, phoneNumberId: null });
+      await updateBlandKeys({ apiKey: null, fromNumber: null });
       setApiKey("");
-      setAssistantId("");
-      setPhoneNumberId("");
+      setFromNumber("");
       const p = await getProfile();
       setProfile(p);
-      setVapiMsg("Vapi account disconnected.");
+      setBlandMsg("Bland AI account disconnected.");
     } catch (e: any) {
-      setVapiMsg(e.message || "Disconnect failed");
+      setBlandMsg(e.message || "Disconnect failed");
     } finally {
-      setVapiSaving(false);
+      setBlandSaving(false);
     }
   };
 
@@ -224,12 +220,12 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
             <div className="mb-4 flex items-center gap-2">
               <span className="text-xl">📞</span>
-              <h2 className="text-lg font-semibold">AI Calling (Vapi)</h2>
+              <h2 className="text-lg font-semibold">AI Calling (Bland AI)</h2>
             </div>
             <p className="mb-4 text-sm text-slate-400">
-              Connect your own Vapi account to power the AI dialer and call
+              Connect your own Bland AI account to power the AI dialer and call
               campaigns. Calls are billed to{" "}
-              <span className="font-semibold text-white">your</span> Vapi
+              <span className="font-semibold text-white">your</span> Bland
               account — never shared with other users.{" "}
               <span
                 className={`font-semibold ${connected ? "text-emerald-400" : "text-amber-400"}`}
@@ -239,47 +235,38 @@ export default function SettingsPage() {
             </p>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-slate-500">Vapi API key</label>
+                <label className="text-xs text-slate-500">Bland API key</label>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Private API key from vapi.ai → API Keys"
+                  placeholder="API key from app.bland.ai dashboard"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Assistant ID</label>
+                <label className="text-xs text-slate-500">Caller ID number</label>
                 <input
-                  value={assistantId}
-                  onChange={(e) => setAssistantId(e.target.value)}
-                  placeholder="Assistant → your assistant → ID"
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Phone Number ID</label>
-                <input
-                  value={phoneNumberId}
-                  onChange={(e) => setPhoneNumberId(e.target.value)}
-                  placeholder="Phone Numbers → your number → ID"
+                  value={fromNumber}
+                  onChange={(e) => setFromNumber(e.target.value)}
+                  placeholder="+14785518838 (a number on your Bland account)"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
                 />
               </div>
             </div>
-            {vapiMsg && <p className="mt-3 text-sm text-slate-300">{vapiMsg}</p>}
+            {blandMsg && <p className="mt-3 text-sm text-slate-300">{blandMsg}</p>}
             <div className="mt-4 flex gap-3">
               <button
-                onClick={saveVapi}
-                disabled={vapiSaving}
+                onClick={saveBland}
+                disabled={blandSaving}
                 className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
-                {vapiSaving ? "Saving…" : connected ? "Update connection" : "Connect Vapi"}
+                {blandSaving ? "Saving…" : connected ? "Update connection" : "Connect Bland AI"}
               </button>
               {connected && (
                 <button
-                  onClick={disconnectVapi}
-                  disabled={vapiSaving}
+                  onClick={disconnectBland}
+                  disabled={blandSaving}
                   className="rounded-lg border border-red-500/40 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
                 >
                   Disconnect
@@ -287,9 +274,8 @@ export default function SettingsPage() {
               )}
             </div>
             <p className="mt-3 text-xs text-slate-500">
-              New to Vapi? Sign up at vapi.ai, create an assistant and a phone
-              number (paid numbers only for campaigns), then paste the three
-              values above.
+              New to Bland AI? Sign up at bland.ai, grab a phone number, then
+              paste your API key and caller ID number above.
             </p>
           </div>
 
