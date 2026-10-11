@@ -444,6 +444,7 @@ export interface Profile {
   subscriptionStatus: string;
   blandApiKey: string | null;
   blandFromNumber: string | null;
+  batchdataApiKey: string | null;
   createdAt: string;
 }
 
@@ -455,6 +456,7 @@ interface ProfileRow {
   subscription_status: string | null;
   bland_api_key: string | null;
   bland_from_number: string | null;
+  batchdata_api_key: string | null;
   created_at: string;
 }
 
@@ -467,6 +469,7 @@ function toProfile(r: ProfileRow): Profile {
     subscriptionStatus: r.subscription_status ?? "",
     blandApiKey: r.bland_api_key,
     blandFromNumber: r.bland_from_number,
+    batchdataApiKey: r.batchdata_api_key,
     createdAt: r.created_at,
   };
 }
@@ -514,6 +517,48 @@ export function hasActiveAccess(profile: Profile | null): boolean {
 
 export function blandConnected(profile: Profile | null): boolean {
   return !!(profile?.blandApiKey && profile?.blandFromNumber);
+}
+
+/** Save (or clear, with null) the user's own BatchData API key. */
+export async function updateBatchDataKey(
+  apiKey: string | null
+): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await sb()
+    .from("profiles")
+    .update({ batchdata_api_key: apiKey || null })
+    .eq("id", userId);
+  if (error) dbError("Failed to save BatchData key", error);
+}
+
+export function batchdataConnected(profile: Profile | null): boolean {
+  return !!profile?.batchdataApiKey;
+}
+
+export interface SkipTraceUsage {
+  traces: number;
+  costCents: number;
+}
+
+/** Client-side read of this month's skip-trace usage (RLS-scoped). */
+export async function getSkipTraceUsageThisMonth(): Promise<SkipTraceUsage> {
+  const userId = await requireUserId();
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const { data, error } = await sb()
+    .from("skip_trace_usage")
+    .select("cost_cents")
+    .eq("user_id", userId)
+    .gte("created_at", monthStart.toISOString());
+  if (error) return { traces: 0, costCents: 0 };
+  return {
+    traces: data?.length ?? 0,
+    costCents: (data ?? []).reduce(
+      (sum, r) => sum + ((r.cost_cents as number) || 0),
+      0
+    ),
+  };
 }
 
 /** @deprecated Use blandConnected instead. Kept for backwards compat. */

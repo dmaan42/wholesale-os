@@ -5,6 +5,19 @@ import { Lead, LeadStatus, PIPELINE_STAGES } from "@/lib/types";
 import { getCallLogs, type CallLog } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 
+interface TracePhone {
+  number: string;
+  type: string | null;
+  dnc: boolean;
+  litigator: boolean;
+}
+
+interface TracePerson {
+  name: string | null;
+  phones: TracePhone[];
+  emails: string[];
+}
+
 interface Props {
   lead: Lead | null;
   open: boolean;
@@ -18,12 +31,17 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
   const [calling, setCalling] = useState(false);
   const [callMsg, setCallMsg] = useState("");
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  const [tracing, setTracing] = useState(false);
+  const [traceMsg, setTraceMsg] = useState("");
+  const [tracePersons, setTracePersons] = useState<TracePerson[]>([]);
   const { session } = useAuth();
 
   useEffect(() => {
     if (lead && open) {
       setForm({ ...lead });
       setCallMsg("");
+      setTraceMsg("");
+      setTracePersons([]);
       getCallLogs(lead.id).then(setCallLogs).catch(() => {});
     }
   }, [lead, open]);
@@ -56,6 +74,50 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
     } finally {
       setCalling(false);
     }
+  };
+
+  const handleSkipTrace = async () => {
+    if (!lead) return;
+    setTracing(true);
+    setTraceMsg("");
+    setTracePersons([]);
+    try {
+      const res = await fetch("/api/skip-trace", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({ leadId: lead.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Skip trace failed");
+      const persons: TracePerson[] = data.persons || [];
+      setTracePersons(persons);
+      const parts: string[] = [];
+      if (data.matchedCount > 0) {
+        parts.push(`Found ${data.matchedCount} contact${data.matchedCount === 1 ? "" : "s"}`);
+      } else {
+        parts.push("No contacts found for this address");
+      }
+      if (data.savedOwnerName) parts.push(`owner name saved`);
+      if (data.savedPhone) {
+        parts.push(`phone saved`);
+        setForm((prev) => ({ ...prev, phone: data.savedPhone }));
+      }
+      setTraceMsg(`🔍 ${parts.join(" · ")}.`);
+    } catch (e: any) {
+      setTraceMsg(e.message || "Skip trace failed");
+    } finally {
+      setTracing(false);
+    }
+  };
+
+  const useTracePhone = (num: string) => {
+    setForm((prev) => ({ ...prev, phone: num }));
+    setTraceMsg(`📱 ${num} set as lead phone — hit Save Changes to keep it.`);
   };
 
   if (!open || !lead) return null;
@@ -215,6 +277,63 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
             />
           </div>
 
+          {traceMsg && (
+            <p className="text-xs text-slate-400">{traceMsg}</p>
+          )}
+          {tracePersons.length > 0 && (
+            <div>
+              <label className="mb-2 block text-xs font-medium text-slate-400">
+                Skip Trace Results ({tracePersons.length} contact{tracePersons.length === 1 ? "" : "s"})
+              </label>
+              <div className="space-y-2">
+                {tracePersons.map((p, i) => (
+                  <div key={i} className="rounded-lg border border-slate-800 bg-slate-800/50 px-3 py-2 text-xs">
+                    {p.name && (
+                      <p className="font-medium text-slate-200">{p.name}</p>
+                    )}
+                    {p.phones.length === 0 && (
+                      <p className="mt-1 text-slate-500">No phones found</p>
+                    )}
+                    {p.phones.map((ph, j) => {
+                      const blocked = ph.dnc || ph.litigator;
+                      return (
+                        <div key={j} className="mt-1.5 flex items-center justify-between gap-2">
+                          <span className={blocked ? "text-slate-500 line-through" : "text-slate-300"}>
+                            {ph.number}
+                            {ph.type ? ` · ${ph.type}` : ""}
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            {ph.dnc && (
+                              <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
+                                DNC
+                              </span>
+                            )}
+                            {ph.litigator && (
+                              <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">
+                                LITIGATOR
+                              </span>
+                            )}
+                            {!blocked && (
+                              <button
+                                onClick={() => useTracePhone(ph.number)}
+                                className="rounded bg-emerald-600/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 hover:bg-emerald-600/40"
+                              >
+                                Use
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {p.emails.length > 0 && (
+                      <p className="mt-1 text-slate-500">{p.emails.join(", ")}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="mb-2 block text-xs font-medium text-slate-400">
               AI Call History {callLogs.length > 0 && `(${callLogs.length})`}
@@ -268,6 +387,13 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
               className="flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-60"
             >
               {calling ? "Dialing…" : "📞 Call with AI"}
+            </button>
+            <button
+              onClick={handleSkipTrace}
+              disabled={tracing}
+              className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60"
+            >
+              {tracing ? "Tracing…" : "🔍 Skip Trace"}
             </button>
           </div>
           <div className="flex gap-2">
