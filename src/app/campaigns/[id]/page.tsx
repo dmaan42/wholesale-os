@@ -60,7 +60,7 @@ export default function CampaignDetailPage() {
       if (busy || cancelled) return;
       busy = true;
       try {
-        await fetch(`/api/campaigns/${id}/pump`, {
+        await fetch(`/api/campaigns/${id}`, {
           method: "POST",
           headers: authHeaders(session),
         }).catch(() => null);
