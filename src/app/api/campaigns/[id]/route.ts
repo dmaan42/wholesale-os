@@ -250,6 +250,12 @@ export async function POST(
     }
 
     // ---- 2) Dispatch a few queued contacts -------------------------------
+    // Honor the campaign's chosen pace (set at launch), capped so one tick
+    // stays well under the serverless timeout.
+    const perTick = Math.min(
+      Math.max(Number(campaign.max_concurrency) || 2, 1),
+      5
+    );
     if (hasBudget() && campaign.status === "running") {
       const { data: queued } = await supabase
         .from("campaign_contacts")
@@ -257,7 +263,7 @@ export async function POST(
         .eq("campaign_id", id)
         .eq("status", "queued")
         .order("created_at", { ascending: true })
-        .limit(3);
+        .limit(perTick);
 
       for (const q of (queued ?? []) as any[]) {
         if (!hasBudget()) break;
