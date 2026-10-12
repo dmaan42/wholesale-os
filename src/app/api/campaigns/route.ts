@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
-import {
-  dispatchBlandCalls,
-  toE164,
-  resolveBlandCreds,
-} from "@/lib/bland";
+import { toE164, resolveBlandCreds } from "@/lib/bland";
 
 export const runtime = "nodejs";
 
@@ -26,10 +22,17 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/campaigns — create + immediately launch a Bland batch campaign.
+// POST /api/campaigns — create a Bland batch campaign and queue its audience.
 // Body: { name, leadIds: string[], maxConcurrency?: number }
 // Bland has no native "campaign" object in v1, so we dispatch individual
-// calls with concurrency control and track them via our own campaign row.
+// calls and track them via our own campaign row.
+//
+// Dispatch does NOT happen inside this request: placing dozens of calls
+// sequentially takes far longer than a serverless function may run, so the
+// request would be killed mid-dispatch and leave the campaign half-started.
+// Instead the campaign is created here with status "running", and the
+// campaign page's live poll drives POST /api/campaigns/[id]/pump, which
+// dispatches a few calls per tick and reconciles in-flight calls with Bland.
 export async function POST(req: Request) {
   // Track rows we inserted so we can roll back if the launch fails.
   let campaignId: string | null = null;
@@ -45,8 +48,9 @@ export async function POST(req: Request) {
     await requireActiveSubscription(supabase, user.id);
 
     // The caller's own Bland credentials — billed to their account.
+    // Checked now so a missing connection fails fast, before rows exist.
     // Throws a user-actionable error when Bland isn't connected.
-    const creds = await resolveBlandCreds(supabase, user.id);
+    await resolveBlandCreds(supabase, user.id);
 
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "Untitled campaign").slice(0, 120);
@@ -104,13 +108,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1) Our campaign row (draft until Bland confirms the launch).
+    // 1) Our campaign row. Status starts "running" — the pump (driven by the
+    //    campaign page's live poll) dispatches the queued audience a few
+    //    calls at a time, so a big batch can never be killed mid-dispatch
+    //    by a serverless timeout.
     const { data: campaign, error: campErr } = await supabase
       .from("campaigns")
       .insert({
         user_id: user.id,
         name,
-        status: "draft",
+        status: "running",
         total_contacts: audience.length,
         max_concurrency: maxConcurrency,
         provider: "bland",
@@ -119,9 +126,10 @@ export async function POST(req: Request) {
       .single();
     if (campErr || !campaign) throw campErr || new Error("Campaign not created");
     campaignId = campaign.id as string;
-    const cid: string = campaignId;
 
-    // 2) Audience rows.
+    // 2) Audience rows, queued for the pump. Call log rows are created by
+    //    the pump at dispatch time so every dial has a record even if the
+    //    provider call fails.
     const { error: contactsErr } = await supabase
       .from("campaign_contacts")
       .insert(
@@ -135,112 +143,10 @@ export async function POST(req: Request) {
       );
     if (contactsErr) throw contactsErr;
 
-    // 3) Pre-create call log rows so every dial has a record even if the
-    //    provider call fails, and so the webhook can correlate by number.
-    const { data: logs, error: logsErr } = await supabase
-      .from("call_logs")
-      .insert(
-        audience.map((a) => ({
-          user_id: user.id,
-          lead_id: a.leadId,
-          campaign_id: campaignId,
-          phone: a.phone,
-          direction: "outbound",
-          status: "queued",
-          provider: "bland",
-        }))
-      )
-      .select("id, lead_id");
-    if (logsErr || !logs) throw logsErr || new Error("Call logs not created");
-
-    const logByLead = new Map<string, string>();
-    for (const log of logs as { id: string; lead_id: string }[]) {
-      logByLead.set(log.lead_id, log.id);
-    }
-    // Link contacts -> their log rows (best effort; RLS-safe).
-    for (const a of audience) {
-      const logId = logByLead.get(a.leadId);
-      if (!logId) continue;
-      await supabase
-        .from("campaign_contacts")
-        .update({ call_log_id: logId })
-        .eq("campaign_id", campaignId)
-        .eq("lead_id", a.leadId);
-    }
-
-    // 4) Dispatch via Bland. This is the point of no return for real calls.
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "https://www.realestatesolutionz.com";
-    const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
-    const webhookUrl =
-      `${appUrl}/api/bland-webhook` +
-      (webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : "");
-
-    // Mark campaign as running before dispatch so the UI reflects it.
-    await supabase
-      .from("campaigns")
-      .update({ status: "running", updated_at: new Date().toISOString() })
-      .eq("id", campaignId);
-
-    const { placed, failed } = await dispatchBlandCalls(
-      creds,
-      audience.map((a) => ({
-        phone_number: a.phone,
-        metadata: {
-          wholesaleOsLeadId: a.leadId,
-          wholesaleOsUserId: user.id,
-          wholesaleOsCampaignId: cid,
-          wholesaleOsCallLogId: logByLead.get(a.leadId) ?? "",
-        },
-        external_id: `wholesaleos-${logByLead.get(a.leadId) ?? a.leadId}`,
-      })),
-      {
-        webhookUrl,
-        maxConcurrency,
-        onCallPlaced: async (index, callId) => {
-          const a = audience[index];
-          const logId = logByLead.get(a.leadId);
-          if (!logId || !supabase) return;
-          await supabase
-            .from("call_logs")
-            .update({ status: "ringing", provider_call_id: callId })
-            .eq("id", logId);
-          await supabase
-            .from("campaign_contacts")
-            .update({ status: "dialing" })
-            .eq("campaign_id", cid)
-            .eq("lead_id", a.leadId);
-        },
-        onCallFailed: async (index, error) => {
-          const a = audience[index];
-          const logId = logByLead.get(a.leadId);
-          if (!logId || !supabase) return;
-          await supabase
-            .from("call_logs")
-            .update({ status: "failed", summary: `Provider error: ${error}` })
-            .eq("id", logId);
-          await supabase
-            .from("campaign_contacts")
-            .update({ status: "failed" })
-            .eq("campaign_id", cid)
-            .eq("lead_id", a.leadId);
-        },
-      }
-    );
-
-    // If every call failed to dispatch, mark the campaign failed.
-    if (placed === 0 && failed > 0) {
-      await supabase
-        .from("campaigns")
-        .update({ status: "failed", updated_at: new Date().toISOString() })
-        .eq("id", campaignId);
-    }
-
     return NextResponse.json({
       ok: true,
       campaignId,
-      launched: placed,
-      failed,
+      queued: audience.length,
     });
   } catch (err: any) {
     // Roll back our rows so a failed launch leaves no orphan campaign.

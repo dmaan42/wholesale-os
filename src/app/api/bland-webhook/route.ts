@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { normalizeDisposition, digitsOnly } from "@/lib/bland";
+import { digitsOnly } from "@/lib/bland";
+import { applyBlandCallUpdate } from "@/lib/bland-sync";
 
 export const runtime = "nodejs";
 
@@ -79,83 +80,8 @@ export async function POST(req: Request) {
 
   if (!callLogId) return NextResponse.json({ received: true });
 
-  // Map Bland fields to our call log.
-  const status = String(body?.status ?? "").toLowerCase();
-  const answeredBy = String(body?.answered_by ?? "").toLowerCase();
-  const durationSeconds = Math.round(
-    Number(body?.corrected_duration ?? 0) || 0
-  );
-  const recordingUrl = body?.recording_url ?? null;
-  const summary = body?.summary ?? null;
-  const transcript = body?.concatenated_transcript ?? null;
-  const dispositionTag = body?.disposition_tag ?? null;
-  const outcome = normalizeDisposition(dispositionTag);
-
-  // Map Bland status to our status vocabulary.
-  let callStatus = "completed";
-  if (status === "failed" || status === "canceled") callStatus = "failed";
-  else if (status === "busy") callStatus = "busy";
-  else if (status === "no-answer") callStatus = "no-answer";
-
-  await supabase
-    .from("call_logs")
-    .update({
-      status: callStatus,
-      duration_seconds: durationSeconds,
-      recording_url: recordingUrl,
-      summary,
-      outcome,
-      transcript,
-      provider_call_id: callId,
-    })
-    .eq("id", callLogId);
-
-  // If this call belonged to a batch campaign, mark its audience row done.
-  await supabase
-    .from("campaign_contacts")
-    .update({ status: callStatus })
-    .eq("call_log_id", callLogId);
-
-  // Advance the pipeline on positive signals only.
-  const o = outcome.toLowerCase();
-  let newStatus: string | null = null;
-  if (o === "hot") {
-    newStatus = "qualified";
-  } else if (o === "follow-up") {
-    newStatus = "contacted";
-  } else if (o === "not interested" || o === "dnc") {
-    newStatus = "contacted";
-  } else if (/voicemail/.test(answeredBy)) {
-    newStatus = "contacted";
-  }
-
-  if (leadId && userId && newStatus) {
-    await supabase
-      .from("leads")
-      .update({ status: newStatus })
-      .eq("id", leadId)
-      .eq("user_id", userId);
-    const { data: lead } = await supabase
-      .from("leads")
-      .select("notes")
-      .eq("id", leadId)
-      .single();
-    const line = `AI call ${new Date().toLocaleDateString()}: ${outcome} (${durationSeconds}s)`;
-    await supabase
-      .from("leads")
-      .update({ notes: `${lead?.notes ? lead.notes + "\n" : ""}${line}` })
-      .eq("id", leadId)
-      .eq("user_id", userId);
-  }
-
-  // Honor DNC: if the prospect asked to be removed, tag the lead.
-  if (o === "dnc" && leadId && userId) {
-    await supabase
-      .from("leads")
-      .update({ tags: ["dnc"] })
-      .eq("id", leadId)
-      .eq("user_id", userId);
-  }
+  // Shared updater (also used by the campaign pump's reconcile pass).
+  await applyBlandCallUpdate(supabase, callLogId, body);
 
   return NextResponse.json({ received: true });
 }

@@ -48,12 +48,58 @@ export default function CampaignDetailPage() {
     if (user) load();
   }, [user, authLoading, router, load]);
 
-  // Live-poll while the campaign is running on our side.
+  // Live-poll while the campaign is running on our side. Each tick first
+  // nudges the server-side pump (dispatches a few queued calls, reconciles
+  // in-flight ones with Bland), then reloads. Keep this page open until the
+  // campaign completes — closing it pauses dispatch.
   useEffect(() => {
     if (data?.campaign?.status !== "running") return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [data?.campaign?.status, load]);
+    let cancelled = false;
+    let busy = false;
+    const tick = async () => {
+      if (busy || cancelled) return;
+      busy = true;
+      try {
+        await fetch(`/api/campaigns/${id}/pump`, {
+          method: "POST",
+          headers: authHeaders(session),
+        }).catch(() => null);
+      } finally {
+        busy = false;
+      }
+      if (!cancelled) await load();
+    };
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [data?.campaign?.status, load, id, session]);
+
+  const resume = async () => {
+    if (
+      !window.confirm(
+        "Resume this campaign? Queued contacts will be dialed and stale in-flight contacts reconciled with Bland."
+      )
+    )
+      return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders(session) },
+        body: JSON.stringify({ action: "resume" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Resume failed");
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Resume failed");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const cancel = async () => {
     if (!window.confirm("Stop this campaign? Calls already in progress may finish.")) return;
@@ -81,9 +127,26 @@ export default function CampaignDetailPage() {
   const contacts: any[] = Array.isArray(live?.contacts) ? live.contacts : [];
 
   const total = campaign?.total_contacts ?? 0;
+  // DB contact statuses: queued | dispatching | dialing | completed |
+  // failed | busy | no-answer | cancelled
+  const dialingCount =
+    (counters.dialing ?? 0) + (counters.dispatching ?? 0);
   const done =
-    (counters.completed ?? 0) + (counters.failed ?? 0) + (counters.skipped ?? 0);
+    (counters.completed ?? 0) +
+    (counters.failed ?? 0) +
+    (counters.busy ?? 0) +
+    (counters["no-answer"] ?? 0) +
+    (counters.cancelled ?? 0);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const statusTiles: [string, number][] = [
+    ["Pending", counters.queued ?? 0],
+    ["Dialing", dialingCount],
+    ["Completed", counters.completed ?? 0],
+    ["No answer", counters["no-answer"] ?? 0],
+    ["Busy", counters.busy ?? 0],
+    ["Failed", counters.failed ?? 0],
+    ["Cancelled", counters.cancelled ?? 0],
+  ];
 
   return (
     <SubscriptionGate>
@@ -121,6 +184,16 @@ export default function CampaignDetailPage() {
                   {cancelling ? "Stopping…" : "Stop campaign"}
                 </button>
               )}
+              {(campaign.status === "failed" ||
+                campaign.status === "cancelled") && (
+                <button
+                  onClick={resume}
+                  disabled={cancelling}
+                  className="rounded-lg bg-emerald-600 px-5 py-2.5 font-semibold hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {cancelling ? "Resuming…" : "Resume campaign"}
+                </button>
+              )}
             </div>
 
             {error && <p className="mt-4 text-sm text-amber-400">{error}</p>}
@@ -138,14 +211,8 @@ export default function CampaignDetailPage() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-                {[
-                  ["Pending", counters.pending ?? "—"],
-                  ["Dispatched", counters.dispatched ?? "—"],
-                  ["Completed", counters.completed ?? "—"],
-                  ["Failed", counters.failed ?? "—"],
-                  ["Skipped", counters.skipped ?? "—"],
-                ].map(([label, value]) => (
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {statusTiles.map(([label, value]) => (
                   <div
                     key={label}
                     className="rounded-xl bg-slate-800/60 px-4 py-3 text-center"
@@ -195,6 +262,8 @@ export default function CampaignDetailPage() {
             <p className="mt-4 text-xs text-slate-500">
               Call outcomes, recordings and summaries are written to each
               lead&apos;s call history automatically when calls finish.
+              {campaign.status === "running" &&
+                " Keep this page open while the campaign runs — closing it pauses dialing."}
             </p>
           </>
         )}

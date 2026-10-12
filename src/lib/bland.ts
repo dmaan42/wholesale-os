@@ -173,6 +173,8 @@ export async function stopBlandCall(
 
 export interface BlandBatchCallObject {
   phone_number: string;
+  /** Contact name — personalizes the seller-qualification prompt. */
+  name?: string;
   task?: string;
   metadata?: Record<string, string>;
   external_id?: string;
@@ -207,6 +209,7 @@ export async function dispatchBlandCalls(
       try {
         const res = await createBlandCall(creds, {
           customerNumber: c.phone_number,
+          customerName: c.name || undefined,
           webhookUrl: opts.webhookUrl,
           metadata: c.metadata,
           externalId: c.external_id,
