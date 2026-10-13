@@ -90,8 +90,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not log call" }, { status: 500 });
     }
 
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "https://www.realestatesolutionz.com";
+    // Derive the origin from the live request, not the build-time env var —
+    // NEXT_PUBLIC_* is inlined at Vercel build time and can go stale.
+    const appUrl = new URL(req.url).origin;
     const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
     const webhookUrl =
       `${appUrl}/api/bland-webhook` +
