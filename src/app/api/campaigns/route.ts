@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
-import { toE164, resolveBlandCreds } from "@/lib/bland";
+import { toE164, resolveElevenLabsCreds } from "@/lib/elevenlabs";
 
 export const runtime = "nodejs";
 
@@ -22,17 +22,17 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/campaigns — create a Bland batch campaign and queue its audience.
+// POST /api/campaigns — create an ElevenLabs batch campaign and queue its audience.
 // Body: { name, leadIds: string[], maxConcurrency?: number }
-// Bland has no native "campaign" object in v1, so we dispatch individual
-// calls and track them via our own campaign row.
+// ElevenLabs has no native "campaign" object for our use, so we dispatch
+// individual calls and track them via our own campaign row.
 //
 // Dispatch does NOT happen inside this request: placing dozens of calls
 // sequentially takes far longer than a serverless function may run, so the
 // request would be killed mid-dispatch and leave the campaign half-started.
 // Instead the campaign is created here with status "running", and the
 // campaign page's live poll drives POST /api/campaigns/[id]/pump, which
-// dispatches a few calls per tick and reconciles in-flight calls with Bland.
+// dispatches a few calls per tick and reconciles in-flight calls with ElevenLabs.
 export async function POST(req: Request) {
   // Track rows we inserted so we can roll back if the launch fails.
   let campaignId: string | null = null;
@@ -47,10 +47,10 @@ export async function POST(req: Request) {
     // Paywall: launching campaigns requires an active subscription or trial.
     await requireActiveSubscription(supabase, user.id);
 
-    // The caller's own Bland credentials — billed to their account.
+    // The caller's own ElevenLabs credentials — billed to their account.
     // Checked now so a missing connection fails fast, before rows exist.
-    // Throws a user-actionable error when Bland isn't connected.
-    await resolveBlandCreds(supabase, user.id);
+    // Throws a user-actionable error when ElevenLabs isn't connected.
+    await resolveElevenLabsCreds(supabase, user.id);
 
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "Untitled campaign").slice(0, 120);
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
         status: "running",
         total_contacts: audience.length,
         max_concurrency: maxConcurrency,
-        provider: "bland",
+        provider: "elevenlabs",
       })
       .select()
       .single();
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
       await supabase.from("campaign_contacts").delete().eq("campaign_id", campaignId);
       await supabase.from("campaigns").delete().eq("id", campaignId);
     }
-    const status = err.status || (err.blandStatus ? 502 : 500);
+    const status = err.status || (err.elevenLabsStatus ? 502 : 500);
     return NextResponse.json(
       { error: err.message || "Campaign launch failed" },
       { status }

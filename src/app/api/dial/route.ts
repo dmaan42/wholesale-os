@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireActiveSubscription } from "@/lib/api-auth";
-import { resolveBlandCreds, createBlandCall, toE164 } from "@/lib/bland";
+import { resolveElevenLabsCreds, createElevenLabsCall, toE164 } from "@/lib/elevenlabs";
 
 export const runtime = "nodejs";
 
 // POST /api/dial  { leadId, phone }
 // Verifies the caller is a signed-in WholesaleOS user, logs the call, then
-// places an outbound AI call through the CALLER'S OWN Bland AI account
-// (connected in Settings → AI Calling). Usage is billed to their Bland
+// places an outbound AI call through the CALLER'S OWN ElevenLabs account
+// (connected in Settings → AI Calling). Usage is billed to their ElevenLabs
 // account, never to the app owner's.
-// Call outcomes arrive later at /api/bland-webhook and update the call log +
-// pipeline stage automatically.
+// Call outcomes arrive later at /api/elevenlabs-webhook and update the call
+// log + pipeline stage automatically.
 //
-// Required: the user must have connected Bland in Settings.
+// Required: the user must have connected ElevenLabs in Settings.
 export async function POST(req: Request) {
   try {
     const { leadId, phone } = await req.json();
@@ -48,10 +48,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // The caller's own Bland credentials — billed to their account.
+    // The caller's own ElevenLabs credentials — billed to their account.
     let creds;
     try {
-      creds = await resolveBlandCreds(supabase, user.id);
+      creds = await resolveElevenLabsCreds(supabase, user.id);
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 503 });
     }
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
         phone,
         direction: "outbound",
         status: "initiated",
-        provider: "bland",
+        provider: "elevenlabs",
       })
       .select()
       .single();
@@ -90,51 +90,63 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Could not log call" }, { status: 500 });
     }
 
-    // Derive the origin from the live request, not the build-time env var —
-    // NEXT_PUBLIC_* is inlined at Vercel build time and can go stale.
-    const appUrl = new URL(req.url).origin;
-    const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
-    const webhookUrl =
-      `${appUrl}/api/bland-webhook` +
-      (webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : "");
-
-    const blandData = await createBlandCall(creds, {
+    // Note: ElevenLabs post-call webhooks are configured on the agent in the
+    // ElevenLabs dashboard (per-agent webhook URL), not per call. Point the
+    // agent's webhook at:
+    //   https://<your-app>/api/elevenlabs-webhook
+    // (optionally with ?secret=<VOICE_WEBHOOK_SECRET>).
+    // Dynamic variables below personalize this specific call's agent prompt.
+    const elevenData = await createElevenLabsCall(creds, {
       customerNumber: e164,
       customerName: lead.owner_name || undefined,
       contactCity: (lead as any).city || undefined,
       propertyAddress: (lead as any).address || undefined,
-      webhookUrl,
       metadata: {
         wholesaleOsLeadId: leadId,
         wholesaleOsUserId: user.id,
         wholesaleOsCallLogId: log.id,
       },
       externalId: `wholesaleos-${log.id}`,
-    }).catch((e: any) => ({ __blandError: e.message || "Voice provider error" }));
+    }).catch((e: any) => ({ __elevenError: e.message || "Voice provider error" }));
 
-    if ((blandData as any).__blandError) {
+    if ((elevenData as any).__elevenError) {
       await supabase
         .from("call_logs")
         .update({
           status: "failed",
-          summary: `Provider error: ${(blandData as any).__blandError}`,
+          summary: `Provider error: ${(elevenData as any).__elevenError}`,
         })
         .eq("id", log.id);
       return NextResponse.json(
-        { error: (blandData as any).__blandError },
+        { error: (elevenData as any).__elevenError },
+        { status: 502 }
+      );
+    }
+
+    const conversationId = (elevenData as any).conversation_id;
+    if (!conversationId) {
+      await supabase
+        .from("call_logs")
+        .update({
+          status: "failed",
+          summary: "Provider error: ElevenLabs did not return a conversation id",
+        })
+        .eq("id", log.id);
+      return NextResponse.json(
+        { error: "ElevenLabs did not return a conversation id" },
         { status: 502 }
       );
     }
 
     await supabase
       .from("call_logs")
-      .update({ status: "ringing", provider_call_id: blandData.call_id })
+      .update({ status: "ringing", provider_call_id: conversationId })
       .eq("id", log.id);
 
     return NextResponse.json({
       ok: true,
       callLogId: log.id,
-      providerCallId: blandData.call_id,
+      providerCallId: conversationId,
     });
   } catch (err: any) {
     return NextResponse.json(

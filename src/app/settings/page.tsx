@@ -6,10 +6,10 @@ import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import {
   getProfile,
-  updateBlandKeys,
+  updateElevenLabsKeys,
   updateBatchDataKey,
   getSkipTraceUsageThisMonth,
-  blandConnected,
+  elevenLabsConnected,
   batchdataConnected,
   hasActiveAccess,
   type Profile,
@@ -45,11 +45,12 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  // Bland form state
+  // ElevenLabs form state
   const [apiKey, setApiKey] = useState("");
-  const [fromNumber, setFromNumber] = useState("");
-  const [blandMsg, setBlandMsg] = useState("");
-  const [blandSaving, setBlandSaving] = useState(false);
+  const [agentId, setAgentId] = useState("");
+  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [elevenMsg, setElevenMsg] = useState("");
+  const [elevenSaving, setElevenSaving] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   // BatchData form state
@@ -75,8 +76,9 @@ export default function SettingsPage() {
       getProfile()
         .then((p) => {
           setProfile(p);
-          setApiKey(p?.blandApiKey ?? "");
-          setFromNumber(p?.blandFromNumber ?? "");
+          setApiKey(p?.elevenLabsApiKey ?? "");
+          setAgentId(p?.elevenLabsAgentId ?? "");
+          setPhoneNumberId(p?.elevenLabsPhoneNumberId ?? "");
           setBatchKey(p?.batchdataApiKey ?? "");
         })
         .catch(() => {});
@@ -99,7 +101,7 @@ export default function SettingsPage() {
     user.email?.split("@")[0] ||
     "Account";
 
-  const connected = blandConnected(profile);
+  const connected = elevenLabsConnected(profile);
   const batchConnected = batchdataConnected(profile);
   const access = hasActiveAccess(profile);
 
@@ -123,25 +125,26 @@ export default function SettingsPage() {
     }
   };
 
-  const saveBland = async () => {
-    setBlandMsg("");
-    if (!apiKey.trim() || !fromNumber.trim()) {
-      setBlandMsg("Fill in both fields.");
+  const saveElevenLabs = async () => {
+    setElevenMsg("");
+    if (!apiKey.trim() || !agentId.trim() || !phoneNumberId.trim()) {
+      setElevenMsg("Fill in all three fields.");
       return;
     }
-    setBlandSaving(true);
+    setElevenSaving(true);
     try {
-      await updateBlandKeys({
+      await updateElevenLabsKeys({
         apiKey: apiKey.trim(),
-        fromNumber: fromNumber.trim(),
+        agentId: agentId.trim(),
+        phoneNumberId: phoneNumberId.trim(),
       });
       const p = await getProfile();
       setProfile(p);
-      setBlandMsg("✓ Bland AI account connected.");
+      setElevenMsg("✓ ElevenLabs account connected.");
     } catch (e: any) {
-      setBlandMsg(e.message || "Save failed");
+      setElevenMsg(e.message || "Save failed");
     } finally {
-      setBlandSaving(false);
+      setElevenSaving(false);
     }
   };
 
@@ -180,20 +183,21 @@ export default function SettingsPage() {
     }
   };
 
-  const disconnectBland = async () => {
-    if (!window.confirm("Disconnect your Bland AI account? The dialer and campaigns will stop working until you reconnect.")) return;
-    setBlandSaving(true);
+  const disconnectElevenLabs = async () => {
+    if (!window.confirm("Disconnect your ElevenLabs account? The dialer and campaigns will stop working until you reconnect.")) return;
+    setElevenSaving(true);
     try {
-      await updateBlandKeys({ apiKey: null, fromNumber: null });
+      await updateElevenLabsKeys({ apiKey: null, agentId: null, phoneNumberId: null });
       setApiKey("");
-      setFromNumber("");
+      setAgentId("");
+      setPhoneNumberId("");
       const p = await getProfile();
       setProfile(p);
-      setBlandMsg("Bland AI account disconnected.");
+      setElevenMsg("ElevenLabs account disconnected.");
     } catch (e: any) {
-      setBlandMsg(e.message || "Disconnect failed");
+      setElevenMsg(e.message || "Disconnect failed");
     } finally {
-      setBlandSaving(false);
+      setElevenSaving(false);
     }
   };
 
@@ -267,12 +271,12 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
             <div className="mb-4 flex items-center gap-2">
               <span className="text-xl">📞</span>
-              <h2 className="text-lg font-semibold">AI Calling (Bland AI)</h2>
+              <h2 className="text-lg font-semibold">AI Calling (ElevenLabs)</h2>
             </div>
             <p className="mb-4 text-sm text-slate-400">
-              Connect your own Bland AI account to power the AI dialer and call
+              Connect your own ElevenLabs account to power the AI dialer and call
               campaigns. Calls are billed to{" "}
-              <span className="font-semibold text-white">your</span> Bland
+              <span className="font-semibold text-white">your</span> ElevenLabs
               account — never shared with other users.{" "}
               <span
                 className={`font-semibold ${connected ? "text-emerald-400" : "text-amber-400"}`}
@@ -282,38 +286,47 @@ export default function SettingsPage() {
             </p>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-slate-500">Bland API key</label>
+                <label className="text-xs text-slate-500">ElevenLabs API key</label>
                 <input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="API key from app.bland.ai dashboard"
+                  placeholder="API key from elevenlabs.io/app/settings/api-keys"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Caller ID number</label>
+                <label className="text-xs text-slate-500">Agent ID</label>
                 <input
-                  value={fromNumber}
-                  onChange={(e) => setFromNumber(e.target.value)}
-                  placeholder="+14785518838 (a number on your Bland account)"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  placeholder="agent_xxxxxxxxxxxxxxxx (your Conversational AI agent)"
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Phone number ID</label>
+                <input
+                  value={phoneNumberId}
+                  onChange={(e) => setPhoneNumberId(e.target.value)}
+                  placeholder="phnum_xxxxxxxxxxxxxxxx (imported Twilio number)"
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
                 />
               </div>
             </div>
-            {blandMsg && <p className="mt-3 text-sm text-slate-300">{blandMsg}</p>}
+            {elevenMsg && <p className="mt-3 text-sm text-slate-300">{elevenMsg}</p>}
             <div className="mt-4 flex gap-3">
               <button
-                onClick={saveBland}
-                disabled={blandSaving}
+                onClick={saveElevenLabs}
+                disabled={elevenSaving}
                 className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
-                {blandSaving ? "Saving…" : connected ? "Update connection" : "Connect Bland AI"}
+                {elevenSaving ? "Saving…" : connected ? "Update connection" : "Connect ElevenLabs"}
               </button>
               {connected && (
                 <button
-                  onClick={disconnectBland}
-                  disabled={blandSaving}
+                  onClick={disconnectElevenLabs}
+                  disabled={elevenSaving}
                   className="rounded-lg border border-red-500/40 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
                 >
                   Disconnect
@@ -321,8 +334,10 @@ export default function SettingsPage() {
               )}
             </div>
             <p className="mt-3 text-xs text-slate-500">
-              New to Bland AI? Sign up at bland.ai, grab a phone number, then
-              paste your API key and caller ID number above.
+              New to ElevenLabs? Sign up at elevenlabs.io, create a Conversational
+              AI agent, import your Twilio phone number, then paste the API key,
+              agent ID, and phone number ID above. Set the agent's post-call
+              webhook to https://www.realestatesolutionz.com/api/elevenlabs-webhook
             </p>
           </div>
 

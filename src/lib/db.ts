@@ -444,6 +444,9 @@ export interface Profile {
   subscriptionStatus: string;
   blandApiKey: string | null;
   blandFromNumber: string | null;
+  elevenLabsApiKey: string | null;
+  elevenLabsAgentId: string | null;
+  elevenLabsPhoneNumberId: string | null;
   batchdataApiKey: string | null;
   createdAt: string;
 }
@@ -456,6 +459,9 @@ interface ProfileRow {
   subscription_status: string | null;
   bland_api_key: string | null;
   bland_from_number: string | null;
+  elevenlabs_api_key: string | null;
+  elevenlabs_agent_id: string | null;
+  elevenlabs_phone_number_id: string | null;
   batchdata_api_key: string | null;
   created_at: string;
 }
@@ -469,6 +475,9 @@ function toProfile(r: ProfileRow): Profile {
     subscriptionStatus: r.subscription_status ?? "",
     blandApiKey: r.bland_api_key,
     blandFromNumber: r.bland_from_number,
+    elevenLabsApiKey: (r as any).elevenlabs_api_key ?? null,
+    elevenLabsAgentId: (r as any).elevenlabs_agent_id ?? null,
+    elevenLabsPhoneNumberId: (r as any).elevenlabs_phone_number_id ?? null,
     batchdataApiKey: r.batchdata_api_key,
     createdAt: r.created_at,
   };
@@ -517,6 +526,32 @@ export function hasActiveAccess(profile: Profile | null): boolean {
 
 export function blandConnected(profile: Profile | null): boolean {
   return !!(profile?.blandApiKey && profile?.blandFromNumber);
+}
+
+/** Save (or clear, with nulls) the user's own ElevenLabs credentials. */
+export async function updateElevenLabsKeys(keys: {
+  apiKey?: string | null;
+  agentId?: string | null;
+  phoneNumberId?: string | null;
+}): Promise<void> {
+  const userId = await requireUserId();
+  const row: Record<string, string | null> = {};
+  if (keys.apiKey !== undefined)
+    row.elevenlabs_api_key = keys.apiKey || null;
+  if (keys.agentId !== undefined)
+    row.elevenlabs_agent_id = keys.agentId || null;
+  if (keys.phoneNumberId !== undefined)
+    row.elevenlabs_phone_number_id = keys.phoneNumberId || null;
+  const { error } = await sb().from("profiles").update(row).eq("id", userId);
+  if (error) dbError("Failed to save ElevenLabs keys", error);
+}
+
+export function elevenLabsConnected(profile: Profile | null): boolean {
+  return !!(
+    profile?.elevenLabsApiKey &&
+    profile?.elevenLabsAgentId &&
+    profile?.elevenLabsPhoneNumberId
+  );
 }
 
 /** Save (or clear, with null) the user's own BatchData API key. */
