@@ -161,8 +161,9 @@ export async function POST(
       return NextResponse.json({ error: e.message }, { status: 503 });
     }
 
-    const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "https://www.realestatesolutionz.com";
+    // Derive the origin from the live request, not the build-time env var —
+    // NEXT_PUBLIC_* is inlined at Vercel build time and can go stale.
+    const appUrl = new URL(req.url).origin;
     const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
     const webhookUrl =
       `${appUrl}/api/bland-webhook` +
