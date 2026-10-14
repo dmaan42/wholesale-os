@@ -43,8 +43,9 @@ export async function GET(req: Request) {
     .limit(25);
 
   if (error) {
+    console.error("[pump-all] supabase error listing campaigns:", error);
     return NextResponse.json(
-      { error: "Failed to list running campaigns" },
+      { error: "Failed to list running campaigns", detail: error.message },
       { status: 500 }
     );
   }
