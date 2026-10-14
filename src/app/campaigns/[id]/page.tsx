@@ -48,34 +48,17 @@ export default function CampaignDetailPage() {
     if (user) load();
   }, [user, authLoading, router, load]);
 
-  // Live-poll while the campaign is running on our side. Each tick first
-  // nudges the server-side pump (dispatches a few queued calls, reconciles
-  // in-flight ones with ElevenLabs), then reloads. Keep this page open until the
-  // campaign completes — closing it pauses dispatch.
+  // Display refresh while the campaign is running. Dispatch is driven
+  // server-side by the Vercel Cron sweeper (/api/campaigns/pump-all, every
+  // minute) — this page only reloads data, so the campaign keeps dialing
+  // even if you close this tab.
   useEffect(() => {
     if (data?.campaign?.status !== "running") return;
-    let cancelled = false;
-    let busy = false;
-    const tick = async () => {
-      if (busy || cancelled) return;
-      busy = true;
-      try {
-        await fetch(`/api/campaigns/${id}`, {
-          method: "POST",
-          headers: authHeaders(session),
-        }).catch(() => null);
-      } finally {
-        busy = false;
-      }
-      if (!cancelled) await load();
-    };
-    tick();
-    const t = setInterval(tick, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [data?.campaign?.status, load, id, session]);
+    const t = setInterval(() => {
+      load().catch(() => null);
+    }, 15000);
+    return () => clearInterval(t);
+  }, [data?.campaign?.status, load]);
 
   const resume = async () => {
     if (
@@ -297,7 +280,7 @@ export default function CampaignDetailPage() {
               Call outcomes, recordings and summaries are written to each
               lead&apos;s call history automatically when calls finish.
               {campaign.status === "running" &&
-                " Keep this page open while the campaign runs — closing it pauses dialing."}
+                " Dialing runs automatically in the background — you can close this page."}
             </p>
           </>
         )}
