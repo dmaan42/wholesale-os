@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
 import {
-  resolveBlandCreds,
-  createBlandCall,
-  getBlandCall,
-} from "@/lib/bland";
-import { applyBlandCallUpdate, isBlandTerminal } from "@/lib/bland-sync";
+  resolveElevenLabsCreds,
+  createElevenLabsCall,
+  getElevenLabsCall,
+} from "@/lib/elevenlabs";
+import {
+  applyElevenLabsCallUpdate,
+  isElevenLabsTerminal,
+} from "@/lib/elevenlabs-sync";
 
 export const runtime = "nodejs";
 
@@ -26,7 +29,7 @@ async function ownCampaign(req: Request, id: string) {
 }
 
 // GET /api/campaigns/[id] — our record + live status aggregated from our own
-// tables (Bland has no native campaign object; we dispatch individual calls).
+// tables (ElevenLabs has no native campaign object; we dispatch individual calls).
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -57,7 +60,7 @@ export async function GET(
       contacts: contacts ?? [],
       callLogs: logs ?? [],
       counters,
-      provider: "bland",
+      provider: "elevenlabs",
     };
 
     return NextResponse.json({ campaign, live, liveError: null });
@@ -70,7 +73,7 @@ export async function GET(
 }
 
 // PATCH /api/campaigns/[id] — { action: "cancel" } stops a running campaign.
-// With Bland we dispatch individual calls (no provider-side campaign object),
+// With ElevenLabs we dispatch individual calls (no provider-side campaign object),
 // so cancelling marks our campaign cancelled and stops dispatching any
 // remaining queued calls. Calls already in progress will finish.
 export async function PATCH(
@@ -129,9 +132,9 @@ export async function PATCH(
 // each tick does a bounded amount of work (< ~8s) so a serverless timeout
 // can never kill a batch mid-dispatch:
 //
-//  1. Reconcile "dialing"/"dispatching" contacts against Bland's API, so
+//  1. Reconcile "dialing"/"dispatching" contacts against ElevenLabs's API, so
 //     calls update even if the post-call webhook never arrived.
-//  2. Re-queue contacts whose calls Bland never saw (stale dispatches,
+//  2. Re-queue contacts whose calls ElevenLabs never saw (stale dispatches,
 //     e.g. from an old API key) — they will be redialed with good creds.
 //  3. Dispatch a few queued contacts (atomically claimed, so two open tabs
 //     can't double-dial).
@@ -156,24 +159,21 @@ export async function POST(
 
     let creds;
     try {
-      creds = await resolveBlandCreds(supabase, user.id);
+      creds = await resolveElevenLabsCreds(supabase, user.id);
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 503 });
     }
 
-    // Derive the origin from the live request, not the build-time env var —
-    // NEXT_PUBLIC_* is inlined at Vercel build time and can go stale.
-    const appUrl = new URL(req.url).origin;
-    const webhookSecret = process.env.VOICE_WEBHOOK_SECRET;
-    const webhookUrl =
-      `${appUrl}/api/bland-webhook` +
-      (webhookSecret ? `?secret=${encodeURIComponent(webhookSecret)}` : "");
+    // Note: ElevenLabs post-call webhooks are configured on the agent in the
+    // ElevenLabs dashboard (not per call). The webhook endpoint is:
+    //   <app-origin>/api/elevenlabs-webhook[?secret=<VOICE_WEBHOOK_SECRET>]
+    // Configure it once on the agent; no per-call webhook needed here.
 
     let reconciled = 0;
     let redispatched = 0;
     let requeued = 0;
 
-    // ---- 1) Reconcile in-flight contacts against Bland -------------------
+    // ---- 1) Reconcile in-flight contacts against ElevenLabs -------------
     const { data: inflight } = await supabase
       .from("campaign_contacts")
       .select("id, lead_id, phone, name, status, call_log_id, created_at")
@@ -196,8 +196,8 @@ export async function POST(
       const providerCallId = log?.provider_call_id as string | undefined;
 
       if (!providerCallId) {
-        // Bland never accepted this call. If it's stale, re-queue it so the
-        // pump redials it below; fresh ones may still be mid-dispatch.
+        // ElevenLabs never accepted this call. If it's stale, re-queue it so
+        // the pump redials it below; fresh ones may still be mid-dispatch.
         const refTime = log?.created_at ?? c.created_at;
         const ageMin = (Date.now() - new Date(refTime).getTime()) / 60000;
         if (ageMin > 15) {
@@ -207,7 +207,7 @@ export async function POST(
               .update({
                 status: "failed",
                 summary:
-                  "Dispatch interrupted before Bland accepted the call — re-queued.",
+                  "Dispatch interrupted before ElevenLabs accepted the call — re-queued.",
               })
               .eq("id", log.id);
           }
@@ -222,20 +222,21 @@ export async function POST(
       }
 
       try {
-        const call = await getBlandCall(creds, providerCallId);
-        if (isBlandTerminal(call?.status)) {
-          await applyBlandCallUpdate(supabase, log.id, call);
+        const call = await getElevenLabsCall(creds, providerCallId);
+        if (isElevenLabsTerminal(call?.status)) {
+          await applyElevenLabsCallUpdate(supabase, log.id, call);
         }
       } catch (e: any) {
-        if (e?.blandStatus === 404) {
-          // Bland has no record of this call in the user's account — it will
-          // never complete. Re-queue so it gets dialed with working creds.
+        if (e?.elevenLabsStatus === 404) {
+          // ElevenLabs has no record of this conversation in the user's
+          // account — it will never complete. Re-queue so it gets dialed
+          // with working creds.
           await supabase
             .from("call_logs")
             .update({
               status: "failed",
               summary:
-                "Call not found in your Bland account (stale dispatch) — re-queued.",
+                "Call not found in your ElevenLabs account (stale dispatch) — re-queued.",
             })
             .eq("id", log.id);
           await supabase
@@ -288,7 +289,7 @@ export async function POST(
             phone: q.phone,
             direction: "outbound",
             status: "queued",
-            provider: "bland",
+            provider: "elevenlabs",
           })
           .select("id")
           .single();
@@ -306,10 +307,9 @@ export async function POST(
           .eq("id", q.id);
 
         try {
-          const res = await createBlandCall(creds, {
+          const res = await createElevenLabsCall(creds, {
             customerNumber: q.phone,
             customerName: q.name || undefined,
-            webhookUrl,
             metadata: {
               wholesaleOsLeadId: q.lead_id ?? "",
               wholesaleOsUserId: user.id,
@@ -318,10 +318,12 @@ export async function POST(
             },
             externalId: `wholesaleos-${logId}`,
           });
-          if (!res?.call_id) throw new Error("Bland did not return a call id");
+          const conversationId = (res as any)?.conversation_id;
+          if (!conversationId)
+            throw new Error("ElevenLabs did not return a conversation id");
           await supabase
             .from("call_logs")
-            .update({ status: "ringing", provider_call_id: res.call_id })
+            .update({ status: "ringing", provider_call_id: conversationId })
             .eq("id", logId);
           await supabase
             .from("campaign_contacts")
@@ -333,7 +335,7 @@ export async function POST(
             .from("call_logs")
             .update({
               status: "failed",
-              summary: `Provider error: ${e.message || "Bland API error"}`,
+              summary: `Provider error: ${e.message || "ElevenLabs API error"}`,
             })
             .eq("id", logId);
           await supabase

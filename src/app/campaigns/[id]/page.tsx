@@ -50,7 +50,7 @@ export default function CampaignDetailPage() {
 
   // Live-poll while the campaign is running on our side. Each tick first
   // nudges the server-side pump (dispatches a few queued calls, reconciles
-  // in-flight ones with Bland), then reloads. Keep this page open until the
+  // in-flight ones with ElevenLabs), then reloads. Keep this page open until the
   // campaign completes — closing it pauses dispatch.
   useEffect(() => {
     if (data?.campaign?.status !== "running") return;
@@ -80,7 +80,7 @@ export default function CampaignDetailPage() {
   const resume = async () => {
     if (
       !window.confirm(
-        "Resume this campaign? Queued contacts will be dialed and stale in-flight contacts reconciled with Bland."
+        "Resume this campaign? Queued contacts will be dialed and stale in-flight contacts reconciled with ElevenLabs."
       )
     )
       return;
