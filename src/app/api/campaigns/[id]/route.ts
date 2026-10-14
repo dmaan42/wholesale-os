@@ -96,6 +96,26 @@ export async function PATCH(
       return NextResponse.json({ ok: true });
     }
 
+    if (body.action === "retry_failed") {
+      // Reset failed contacts to queued so the pump redials them.
+      // Also flip the campaign back to running if it had completed.
+      const { count } = await supabase
+        .from("campaign_contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", id)
+        .eq("status", "failed");
+      await supabase
+        .from("campaign_contacts")
+        .update({ status: "queued", call_log_id: null })
+        .eq("campaign_id", id)
+        .eq("status", "failed");
+      await supabase
+        .from("campaigns")
+        .update({ status: "running", updated_at: new Date().toISOString() })
+        .eq("id", id);
+      return NextResponse.json({ ok: true, retried: count ?? 0 });
+    }
+
     if (body.action !== "cancel") {
       return NextResponse.json({ error: "Unknown action" }, { status: 400 });
     }

@@ -101,6 +101,30 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const retryFailed = async () => {
+    if (
+      !window.confirm(
+        "Retry all failed calls in this campaign? They will be re-queued for dialing."
+      )
+    )
+      return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/campaigns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders(session) },
+        body: JSON.stringify({ action: "retry_failed" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Retry failed");
+      await load();
+    } catch (e: any) {
+      setError(e.message || "Retry failed");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const cancel = async () => {
     if (!window.confirm("Stop this campaign? Calls already in progress may finish.")) return;
     setCancelling(true);
@@ -192,6 +216,16 @@ export default function CampaignDetailPage() {
                   className="rounded-lg bg-emerald-600 px-5 py-2.5 font-semibold hover:bg-emerald-500 disabled:opacity-50"
                 >
                   {cancelling ? "Resuming…" : "Resume campaign"}
+                </button>
+              )}
+              {(campaign.status === "running" ||
+                campaign.status === "completed") && (
+                <button
+                  onClick={retryFailed}
+                  disabled={cancelling}
+                  className="rounded-lg border border-amber-700 px-5 py-2.5 font-semibold text-amber-400 hover:bg-amber-950 disabled:opacity-50"
+                >
+                  {cancelling ? "Retrying…" : "Retry failed calls"}
                 </button>
               )}
             </div>
