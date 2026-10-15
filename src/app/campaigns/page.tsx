@@ -42,6 +42,7 @@ export default function CampaignsPage() {
   const [startMode, setStartMode] = useState<"now" | "later">("now");
   const [startAt, setStartAt] = useState("");
   const [launching, setLaunching] = useState(false);
+  const [confirmArmed, setConfirmArmed] = useState(false);
   const [error, setError] = useState("");
 
   const refresh = async () => {
@@ -88,6 +89,7 @@ export default function CampaignsPage() {
     setError("");
     if (selected.size === 0) {
       setError("Select at least one lead.");
+      setConfirmArmed(false);
       return;
     }
     let earliestAt: string | undefined;
@@ -103,19 +105,13 @@ export default function CampaignsPage() {
       }
       earliestAt = d.toISOString();
     }
-    const sample = dialableLeads
-      .filter((l) => selected.has(l.id))
-      .slice(0, 3)
-      .map((l) => `${l.ownerName || "Unknown"} (${l.phone})`)
-      .join(", ");
-    const ok = window.confirm(
-      `Launch "${name || "Untitled campaign"}"?\n\n` +
-        `${selected.size} lead${selected.size === 1 ? "" : "s"} will be called ` +
-        `(${concurrency} at a time)${earliestAt ? ` starting ${new Date(earliestAt).toLocaleString()}` : " right away"}.\n` +
-        `Including: ${sample}${selected.size > 3 ? ", …" : ""}\n\n` +
-        `This places real, chargeable calls. Only include leads you are allowed to auto-dial.`
-    );
-    if (!ok) return;
+    // Two-step inline confirmation (no native window.confirm — it can't be
+    // automated and is easy to miss). First click arms, second click launches.
+    if (!confirmArmed) {
+      setConfirmArmed(true);
+      return;
+    }
+    setConfirmArmed(false);
 
     setLaunching(true);
     try {
@@ -300,7 +296,10 @@ export default function CampaignsPage() {
 
               <div className="mt-5 flex justify-end gap-3">
                 <button
-                  onClick={() => setModalOpen(false)}
+                  onClick={() => {
+                    setModalOpen(false);
+                    setConfirmArmed(false);
+                  }}
                   className="rounded-lg border border-slate-700 px-5 py-2.5 text-slate-300 hover:bg-slate-800"
                 >
                   Cancel
@@ -308,9 +307,17 @@ export default function CampaignsPage() {
                 <button
                   onClick={launch}
                   disabled={launching}
-                  className="rounded-lg bg-emerald-600 px-5 py-2.5 font-semibold hover:bg-emerald-500 disabled:opacity-50"
+                  className={`rounded-lg px-5 py-2.5 font-semibold disabled:opacity-50 ${
+                    confirmArmed
+                      ? "bg-amber-600 hover:bg-amber-500"
+                      : "bg-emerald-600 hover:bg-emerald-500"
+                  }`}
                 >
-                  {launching ? "Launching…" : "🚀 Launch campaign"}
+                  {launching
+                    ? "Launching…"
+                    : confirmArmed
+                      ? `⚠️ Confirm: call ${selected.size} lead${selected.size === 1 ? "" : "s"}?`
+                      : "🚀 Launch campaign"}
                 </button>
               </div>
             </div>
