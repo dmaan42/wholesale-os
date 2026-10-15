@@ -513,9 +513,16 @@ const TRIAL_DAYS = 14;
 /**
  * Whether the user may access the app: active/trialing subscription, or
  * still inside the 14-day free trial (and not canceled/past_due/unpaid).
+ * The founder (NEXT_PUBLIC_FOUNDER_EMAIL) always has access and never
+ * pays themselves a subscription.
  */
 export function hasActiveAccess(profile: Profile | null): boolean {
   if (!profile) return false;
+  const founderEmail = (process.env.NEXT_PUBLIC_FOUNDER_EMAIL || "")
+    .trim()
+    .toLowerCase();
+  if (founderEmail && (profile.email || "").toLowerCase() === founderEmail)
+    return true;
   const s = (profile.subscriptionStatus || "").toLowerCase();
   if (s === "active" || s === "trialing") return true;
   if (s === "canceled" || s === "cancelled" || s === "past_due" || s === "unpaid")

@@ -31,6 +31,7 @@ const TRIAL_DAYS = 14;
 /**
  * Server-side twin of the client-side hasActiveAccess() in lib/db.ts.
  * Throws 402 when the user has no active subscription or trial.
+ * The founder (NEXT_PUBLIC_FOUNDER_EMAIL) is always allowed through.
  * Call this in every API route that performs a chargeable action
  * (placing calls, launching campaigns) — the client-side
  * <SubscriptionGate> alone can be bypassed with a direct API call.
@@ -41,13 +42,22 @@ export async function requireActiveSubscription(
 ): Promise<void> {
   const { data: profile } = await supabase
     .from("profiles")
-    .select("subscription_status, created_at")
+    .select("subscription_status, created_at, email")
     .eq("id", userId)
     .single();
   const denied = new Error(
     "Subscription required — your trial has ended. Subscribe in Settings to keep calling."
   ) as Error & { status?: number };
   denied.status = 402;
+  // Founder bypass: the owner never pays themselves a subscription.
+  const founderEmail = (process.env.NEXT_PUBLIC_FOUNDER_EMAIL || "")
+    .trim()
+    .toLowerCase();
+  if (
+    founderEmail &&
+    ((profile?.email as string) || "").toLowerCase() === founderEmail
+  )
+    return;
   const s = ((profile?.subscription_status as string) || "").toLowerCase();
   if (s === "active" || s === "trialing") return;
   if (
