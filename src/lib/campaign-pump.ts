@@ -40,6 +40,14 @@ export interface PumpResult {
   gaveUp: number;
   rateLimited: boolean;
   campaignStatus: string;
+  /** Per-tick ElevenLabs sync failures (non-404) — surfaced so stale
+   *  "dialing" labels are diagnosable from the pump-all response. */
+  syncErrors: string[];
+  /** Provider statuses seen this tick that were NOT terminal (e.g. how
+   *  many in-flight conversations ElevenLabs still reports as
+   *  in-progress/processing). Distinguishes "API failing" from
+   *  "provider never reports terminal". */
+  providerStatusCounts: Record<string, number>;
 }
 
 function isRateLimitError(e: any): boolean {
@@ -90,6 +98,8 @@ export async function pumpCampaign(
     gaveUp: 0,
     rateLimited: false,
     campaignStatus: campaign.status,
+    syncErrors: [],
+    providerStatusCounts: {},
     ...partial,
   });
 
@@ -119,6 +129,8 @@ export async function pumpCampaign(
   let requeued = 0;
   let gaveUp = 0;
   let rateLimited = false;
+  const syncErrors: string[] = [];
+  const providerStatusCounts: Record<string, number> = {};
 
   // ---- 1) Reconcile in-flight contacts against ElevenLabs -------------
   const { data: inflight } = await supabase
@@ -156,6 +168,9 @@ export async function pumpCampaign(
             `Gave up after ${MAX_ATTEMPTS} dispatch attempts — the provider never accepted the call.`
           );
           gaveUp++;
+          console.warn(
+            `[pump] campaign ${id}: contact ${c.id} gave up after ${MAX_ATTEMPTS} dispatch attempts (no provider call id)`
+          );
         } else {
           if (log) {
             await supabase
@@ -180,11 +195,23 @@ export async function pumpCampaign(
 
     try {
       const call = await getElevenLabsCall(creds, providerCallId);
+      const rawStatus = String(call?.status ?? "").toLowerCase();
       if (isElevenLabsTerminal(call?.status)) {
         await applyElevenLabsCallUpdate(supabase, log.id, call);
+      } else {
+        // Not terminal yet — count it so the pump-all response shows
+        // whether the provider is lagging vs the API failing.
+        providerStatusCounts[rawStatus || "(no status)"] =
+          (providerStatusCounts[rawStatus || "(no status)"] ?? 0) + 1;
+        console.warn(
+          `[pump] campaign ${id}: contact ${c.id} conv ${providerCallId} ` +
+            `provider status "${rawStatus || "(missing)"}" — not terminal, leaving in flight`
+        );
       }
     } catch (e: any) {
-      if (e?.elevenLabsStatus === 404) {
+      const errStatus = e?.elevenLabsStatus ?? "?";
+      const errMsg = e?.message ?? String(e);
+      if (errStatus === 404) {
         // ElevenLabs has no record of this conversation in the user's
         // account — it will never complete. Re-queue unless attempts are
         // exhausted.
@@ -211,9 +238,20 @@ export async function pumpCampaign(
             .eq("id", c.id);
           requeued++;
         }
+        console.warn(
+          `[pump] campaign ${id}: contact ${c.id} conv ${providerCallId} ` +
+            `not found in ElevenLabs account (404) — ` +
+            `${(c.attempts ?? 0) >= MAX_ATTEMPTS ? "gave up" : "re-queued"}`
+        );
+      } else {
+        // Previously these were swallowed silently, leaving the contact
+        // stuck on "dialing" with no trace. Surface them in the pump
+        // result and Vercel logs so the sync failure is diagnosable.
+        const entry =
+          `contact ${c.id} conv ${providerCallId}: [${errStatus}] ${errMsg}`;
+        syncErrors.push(entry);
+        console.error(`[pump] campaign ${id}: ElevenLabs sync error ${entry}`);
       }
-      // Other errors (transient): leave the contact in flight; the next
-      // tick or the webhook will pick it up.
     }
     reconciled++;
   }
@@ -374,5 +412,7 @@ export async function pumpCampaign(
     gaveUp,
     rateLimited,
     campaignStatus,
+    syncErrors,
+    providerStatusCounts,
   });
 }
