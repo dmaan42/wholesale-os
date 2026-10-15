@@ -22,6 +22,9 @@ import {
  *   call limit (ElevenLabs Creator ≈ 100 convos/day); reconcile still runs.
  * - Rate-limit errors (429 / quota messages) re-queue the contact WITHOUT
  *   consuming an attempt and halt dispatch for the tick.
+ * - STALE_INFLIGHT_MINUTES: a provider-side call stuck in a non-terminal
+ *   status (e.g. "initiated") for 30+ minutes is marked failed and the
+ *   contact re-queued, so dead calls can't wedge the reconcile queue.
  * - Bounded work per invocation so serverless timeouts can't kill a batch
  *   mid-dispatch.
  */
@@ -29,6 +32,10 @@ import {
 export const MAX_ATTEMPTS = 3;
 export const DAILY_CALL_CAP = 90;
 const STALE_DISPATCH_MINUTES = 15;
+// A provider-side call that never reaches a terminal status (e.g. stuck at
+// "initiated") is dead — stop waiting and re-queue the contact instead of
+// leaving it "dialing" forever and blocking the reconcile queue behind it.
+const STALE_INFLIGHT_MINUTES = 30;
 const PER_TICK_MAX = 5;
 
 export interface PumpResult {
@@ -203,10 +210,42 @@ export async function pumpCampaign(
         // whether the provider is lagging vs the API failing.
         providerStatusCounts[rawStatus || "(no status)"] =
           (providerStatusCounts[rawStatus || "(no status)"] ?? 0) + 1;
-        console.warn(
-          `[pump] campaign ${id}: contact ${c.id} conv ${providerCallId} ` +
-            `provider status "${rawStatus || "(missing)"}" — not terminal, leaving in flight`
-        );
+        // A call stuck in a non-terminal provider status for too long will
+        // never complete (observed: "initiated" for 90+ minutes). Fail it and
+        // re-queue the contact so the campaign keeps moving; attempts were
+        // already consumed when the call was dispatched, so MAX_ATTEMPTS
+        // still bounds total retries.
+        const refTime = log?.created_at ?? c.created_at;
+        const ageMin = (Date.now() - new Date(refTime).getTime()) / 60000;
+        if (ageMin > STALE_INFLIGHT_MINUTES) {
+          if ((c.attempts ?? 0) >= MAX_ATTEMPTS) {
+            await markGaveUp(
+              supabase,
+              c.id,
+              log?.id ?? null,
+              `Gave up after ${MAX_ATTEMPTS} attempts — the provider never completed the call (stuck at "${rawStatus}").`
+            );
+            gaveUp++;
+          } else {
+            await supabase
+              .from("call_logs")
+              .update({
+                status: "failed",
+                summary: `Call stuck at provider status "${rawStatus || "unknown"}" for ${Math.round(ageMin)} min — never started, re-queued.`,
+              })
+              .eq("id", log.id);
+            await supabase
+              .from("campaign_contacts")
+              .update({ status: "queued", call_log_id: null })
+              .eq("id", c.id);
+            requeued++;
+          }
+        } else {
+          console.warn(
+            `[pump] campaign ${id}: contact ${c.id} conv ${providerCallId} ` +
+              `provider status "${rawStatus || "(missing)"}" — not terminal, leaving in flight`
+          );
+        }
       }
     } catch (e: any) {
       const errStatus = e?.elevenLabsStatus ?? "?";
