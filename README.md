@@ -42,6 +42,9 @@ Open [http://localhost:3000](http://localhost:3000).
    - `leads`, `buyers`, `call_logs` — all isolated per user via row-level security
 3. Copy your **Project URL**, **anon public key**, and **service_role key**
    (Project Settings → API) into your env vars.
+4. (Optional, recommended for the owner) Set `NEXT_PUBLIC_FOUNDER_EMAIL` to your
+   own account email. The founder bypasses the subscription paywall everywhere
+   (app access, campaign dialing) so you never pay yourself a subscription fee.
 
 > If you enabled **Confirm email** (Auth → Providers → Email), new signups must click
 > the confirmation link before signing in — the login page handles this state.
