@@ -38,10 +38,40 @@ function flattenTranscript(transcript: any): string | null {
 
 /**
  * Classify the call outcome from the transcript + analysis.
- * ElevenLabs has no native dispositions, so we do keyword classification
- * webhook-side. Returns one of: hot, follow_up, not_interested, dnc, unknown.
+ * Prefers the agent's structured `lead_disposition` evaluation criterion
+ * (configured on the ElevenLabs agent) when present; falls back to keyword
+ * classification webhook-side. Returns one of: hot, follow_up,
+ * not_interested, dnc, unknown.
  */
 export function classifyElevenLabsOutcome(call: any): string {
+  // Structured disposition from the agent's post-call analysis criteria.
+  // ElevenLabs returns these under analysis.evaluation_results as a list of
+  // { name/criterion, result/value } entries (shape varies by API version).
+  try {
+    const evalResults = call?.analysis?.evaluation_results;
+    const items: any[] = Array.isArray(evalResults)
+      ? evalResults
+      : evalResults && typeof evalResults === "object"
+        ? Object.entries(evalResults).map(([k, v]) => ({ name: k, value: v }))
+        : [];
+    for (const item of items) {
+      const name = String(
+        item?.name ?? item?.criterion ?? item?.criterion_name ?? ""
+      ).toLowerCase();
+      const value = String(
+        item?.result ?? item?.value ?? item?.evaluation ?? ""
+      ).toLowerCase();
+      if (name.includes("disposition") || name.includes("lead")) {
+        const v = value.replace(/[\s-]+/g, "_");
+        if (["hot", "follow_up", "not_interested", "dnc"].includes(v))
+          return v;
+        if (v === "interested") return "follow_up";
+      }
+    }
+  } catch {
+    // Fall through to keyword classification.
+  }
+
   const summary = String(call?.analysis?.transcript_summary ?? "").toLowerCase();
   const evalResult = String(
     call?.analysis?.evaluation_results ?? call?.analysis?.call_successful ?? ""
