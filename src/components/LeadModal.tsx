@@ -34,6 +34,7 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
   const [tracing, setTracing] = useState(false);
   const [traceMsg, setTraceMsg] = useState("");
   const [tracePersons, setTracePersons] = useState<TracePerson[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const { session } = useAuth();
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
       setCallMsg("");
       setTraceMsg("");
       setTracePersons([]);
+      setConfirmDelete(false);
       getCallLogs(lead.id).then(setCallLogs).catch(() => {});
     }
   }, [lead, open]);
@@ -372,14 +374,19 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                if (confirm("Delete this lead?")) {
+                if (confirmDelete) {
                   onDelete(lead.id);
                   onClose();
+                } else {
+                  setConfirmDelete(true);
+                  setTimeout(() => setConfirmDelete(false), 5000);
                 }
               }}
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10"
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-red-500/10 ${
+                confirmDelete ? "bg-red-500/20 font-semibold text-red-300" : "text-red-400"
+              }`}
             >
-              🗑️ Delete
+              {confirmDelete ? "⚠️ Click again to confirm delete" : "🗑️ Delete"}
             </button>
             <button
               onClick={handleCallAI}
