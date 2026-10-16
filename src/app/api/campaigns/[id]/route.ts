@@ -33,14 +33,36 @@ export async function GET(
     // Aggregate per-contact status from our own tables.
     const { data: contacts } = await supabase
       .from("campaign_contacts")
-      .select("id, lead_id, phone, name, status")
+      .select("id, lead_id, phone, name, status, call_log_id, attempts")
       .eq("campaign_id", id)
       .order("created_at", { ascending: true });
 
     const { data: logs } = await supabase
       .from("call_logs")
-      .select("id, lead_id, status, duration_seconds, outcome, summary")
+      .select("id, lead_id, status, duration_seconds, outcome, summary, provider_call_id, created_at")
       .eq("campaign_id", id);
+
+    const logById: Record<string, any> = {};
+    for (const l of logs ?? []) logById[(l as any).id] = l;
+
+    // Attach each contact's latest call detail so the UI can render
+    // outcome, duration, summary and recording without extra fetches.
+    const enriched = (contacts ?? []).map((c: any) => {
+      const log = (c.call_log_id && logById[c.call_log_id]) || null;
+      return {
+        ...c,
+        call: log
+          ? {
+              status: log.status,
+              durationSeconds: log.duration_seconds,
+              outcome: log.outcome,
+              summary: log.summary,
+              providerCallId: log.provider_call_id,
+              at: log.created_at,
+            }
+          : null,
+      };
+    });
 
     const counters: Record<string, number> = {};
     for (const c of contacts ?? []) {
@@ -49,7 +71,7 @@ export async function GET(
     }
 
     const live = {
-      contacts: contacts ?? [],
+      contacts: enriched,
       callLogs: logs ?? [],
       counters,
       provider: "elevenlabs",

@@ -23,6 +23,37 @@ export default function CampaignDetailPage() {
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioFor, setAudioFor] = useState<string | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+
+  const playRecording = useCallback(
+    async (providerCallId: string) => {
+      // Toggle off if already playing this one.
+      if (audioFor === providerCallId && audioUrl) {
+        setAudioFor(null);
+        setAudioUrl(null);
+        return;
+      }
+      setAudioLoading(true);
+      try {
+        const res = await fetch(
+          `/api/call-logs/recording?providerCallId=${encodeURIComponent(providerCallId)}`,
+          { headers: authHeaders(session) }
+        );
+        if (!res.ok) throw new Error("Recording unavailable");
+        const blob = await res.blob();
+        if (audioUrl) URL.revokeObjectURL(audioUrl);
+        setAudioUrl(URL.createObjectURL(blob));
+        setAudioFor(providerCallId);
+      } catch (e: any) {
+        setError(e.message || "Recording failed");
+      } finally {
+        setAudioLoading(false);
+      }
+    },
+    [session, audioFor, audioUrl]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -256,24 +287,78 @@ export default function CampaignDetailPage() {
                     : "Live contact data unavailable."}
                 </p>
               ) : (
-                contacts.map((c: any, i: number) => (
-                  <div
-                    key={c.id ?? i}
-                    className="flex items-center justify-between border-b border-slate-800/60 bg-slate-900 px-5 py-3 last:border-0"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">
-                        {c.name || "Unknown"} · {c.number || c.phone || ""}
-                      </p>
-                      {c.endedReason && (
-                        <p className="text-xs text-slate-500">{c.endedReason}</p>
+                contacts.map((c: any, i: number) => {
+                  const call = c.call ?? null;
+                  const outcome = call?.outcome ?? null;
+                  const dur = call?.durationSeconds;
+                  return (
+                    <div
+                      key={c.id ?? i}
+                      className="border-b border-slate-800/60 bg-slate-900 px-5 py-3 last:border-0"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {c.name || "Unknown"} · {c.number || c.phone || ""}
+                          </p>
+                          {c.endedReason && (
+                            <p className="text-xs text-slate-500">{c.endedReason}</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {outcome && (
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                /hot/i.test(outcome)
+                                  ? "bg-red-500/20 text-red-300"
+                                  : /interest|follow/i.test(outcome)
+                                    ? "bg-amber-500/20 text-amber-300"
+                                    : /dnc|not interested/i.test(outcome)
+                                      ? "bg-slate-700/40 text-slate-400"
+                                      : "bg-emerald-500/20 text-emerald-300"
+                              }`}
+                            >
+                              {outcome}
+                            </span>
+                          )}
+                          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">
+                            {c.status ?? "—"}
+                          </span>
+                        </div>
+                      </div>
+                      {(dur != null || call?.summary) && (
+                        <div className="mt-1.5 text-xs text-slate-400">
+                          {dur != null && dur > 0 && (
+                            <span className="mr-2 text-slate-500">
+                              {Math.floor(dur / 60)}:{String(dur % 60).padStart(2, "0")}
+                            </span>
+                          )}
+                          {call?.summary && (
+                            <span className="line-clamp-2">{call.summary}</span>
+                          )}
+                        </div>
+                      )}
+                      {call?.providerCallId && (
+                        <div className="mt-1.5">
+                          <button
+                            onClick={() => playRecording(call.providerCallId)}
+                            disabled={audioLoading}
+                            className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-50"
+                          >
+                            {audioLoading && audioFor !== call.providerCallId
+                              ? "Loading…"
+                              : audioFor === call.providerCallId
+                                ? "⏸ Hide recording"
+                                : "▶ Play recording"}
+                          </button>
+                          {audioFor === call.providerCallId && audioUrl && (
+                            <audio className="mt-2 w-full" controls src={audioUrl} autoPlay />
+                          )}
+                        </div>
                       )}
                     </div>
-                    <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">
-                      {c.status ?? "—"}
-                    </span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             <p className="mt-4 text-xs text-slate-500">
