@@ -306,13 +306,16 @@ export async function pumpCampaign(
   if (hasBudget() && campaign.status === "running" && !rateLimited) {
     // Daily provider cap: don't dispatch when the user is near their
     // ElevenLabs daily conversation limit. Reconcile still ran above.
-    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // Use calendar day (UTC midnight) not rolling 24h — otherwise
+    // yesterday's heavy campaign blocks today's fresh campaign.
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
     const { count: callsToday } = await supabase
       .from("call_logs")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("provider", "elevenlabs")
-      .gte("created_at", dayAgo);
+      .gte("created_at", startOfDay.toISOString());
     if ((callsToday ?? 0) >= DAILY_CALL_CAP) {
       rateLimited = true;
     } else {
