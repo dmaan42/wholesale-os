@@ -4,6 +4,7 @@ import {
   resolveElevenLabsCreds,
   createElevenLabsCall,
   getElevenLabsCall,
+  toE164,
 } from "@/lib/elevenlabs";
 import {
   applyElevenLabsCallUpdate,
@@ -27,6 +28,10 @@ import {
  *   contact re-queued, so dead calls can't wedge the reconcile queue.
  * - Bounded work per invocation so serverless timeouts can't kill a batch
  *   mid-dispatch.
+ * - E.164 normalization: dispatch normalizes the stored phone with toE164()
+ *   before calling ElevenLabs. A non-E.164 to_number returns a conversation
+ *   stuck at provider status "initiated" forever — the call never rings
+ *   (root cause of the Birmingham 40/40 failure, 2026-10-16).
  */
 
 export const MAX_ATTEMPTS = 3;
@@ -369,8 +374,30 @@ export async function pumpCampaign(
           .eq("id", q.id);
 
         try {
+          // ElevenLabs requires E.164 for to_number. A malformed number
+          // still returns a conversation_id, but the call can never start —
+          // it sits at provider status "initiated" forever (observed:
+          // Birmingham 40/40 stuck, 3 attempts each, zero completed).
+          const dialable = toE164(q.phone);
+          if (!dialable) {
+            await supabase
+              .from("call_logs")
+              .update({
+                status: "failed",
+                summary: `Phone number is not dialable: "${q.phone ?? ""}"`,
+              })
+              .eq("id", logId);
+            await supabase
+              .from("campaign_contacts")
+              .update({
+                status: "failed",
+                attempts: (q.attempts ?? 0) + 1,
+              })
+              .eq("id", q.id);
+            continue;
+          }
           const res = await createElevenLabsCall(creds, {
-            customerNumber: q.phone,
+            customerNumber: dialable,
             customerName: q.name || undefined,
             metadata: {
               wholesaleOsLeadId: q.lead_id ?? "",
