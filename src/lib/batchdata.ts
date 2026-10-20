@@ -11,6 +11,10 @@
  * Auth: `Authorization: Bearer <api_key>`.
  * Skip trace: POST /api/v1/property/skip-trace
  *   body: { requests: [{ propertyAddress: { street, city, state, zip } }] }
+ * Property search: POST /api/v1/property/search
+ *   body: { searchCriteria: {...}, options: { take, skip, sort, datasets } }
+ *   Multiple searchCriteria are AND-ed. take: 0 returns count only
+ *   (meta.resultsFound), billed at the 1-record minimum.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -231,4 +235,221 @@ export function firstCallablePhone(result: SkipTraceResult): string | null {
     }
   }
   return null;
+}
+
+// ==================== Property Search ====================
+
+/** String operators accepted by BatchData search filters. */
+export interface StringFilter {
+  equals?: string;
+  contains?: string;
+  startsWith?: string;
+  endsWith?: string;
+  inList?: string[];
+}
+
+/** Number operators accepted by BatchData search filters. */
+export interface NumberFilter {
+  min?: number;
+  max?: number;
+}
+
+/** Boolean operator accepted by BatchData search filters. */
+export interface BooleanFilter {
+  equals?: boolean;
+}
+
+/**
+ * BatchData property-search criteria. Multiple criteria are AND-ed.
+ * See https://docs.batchdata.com/ for the full filter reference.
+ */
+export interface PropertySearchCriteria {
+  quickLists?: string[];
+  orQuickLists?: string[];
+  address?: {
+    zip?: StringFilter;
+    city?: StringFilter;
+    state?: StringFilter;
+    county?: StringFilter;
+  };
+  listing?: {
+    status?: StringFilter;
+    statusCategory?: StringFilter;
+    price?: NumberFilter;
+    daysOnMarket?: NumberFilter;
+  };
+  valuation?: {
+    estimatedValue?: NumberFilter;
+    equityPercent?: NumberFilter;
+    ltv?: NumberFilter;
+  };
+  building?: {
+    bedroomCount?: NumberFilter;
+    bathroomCount?: NumberFilter;
+    livingAreaSquareFeet?: NumberFilter;
+    yearBuilt?: NumberFilter;
+  };
+  general?: {
+    propertyTypeCategory?: StringFilter;
+    propertyTypeDetail?: StringFilter;
+  };
+  tax?: {
+    taxDelinquentYear?: NumberFilter;
+  };
+  foreclosure?: {
+    status?: StringFilter;
+    recordingDate?: { minDate?: string; maxDate?: string };
+    auctionDate?: { minDate?: string; maxDate?: string };
+  };
+  owner?: {
+    ownerOccupied?: BooleanFilter;
+  };
+  sale?: {
+    lastSalePrice?: NumberFilter;
+    lastSaleDate?: { minDate?: string; maxDate?: string };
+  };
+}
+
+export interface PropertySearchOptions {
+  /** 0-100, default 25. Use 0 for count-only (returns meta.resultsFound). */
+  take?: number;
+  skip?: number;
+  sort?: Record<string, "asc" | "desc">;
+  datasets?: string[];
+}
+
+export interface PropertySearchResult {
+  /** Raw property objects as returned by BatchData. */
+  properties: any[];
+  /** Number of properties in this page. */
+  resultCount: number;
+  /** Total matches across all pages (from meta.resultsFound). */
+  resultsFound: number;
+}
+
+/**
+ * Search BatchData's property database with distress/investor filters.
+ * Each returned property record is billable on the user's BatchData
+ * account; use take: 0 first for a count-only check (1-record minimum).
+ */
+export async function searchProperties(
+  creds: BatchDataCreds,
+  searchCriteria: PropertySearchCriteria,
+  options?: PropertySearchOptions
+): Promise<PropertySearchResult> {
+  const data = await batchDataFetch("/api/v1/property/search", creds, {
+    method: "POST",
+    body: JSON.stringify({
+      searchCriteria,
+      options: {
+        take: 25,
+        ...(options ?? {}),
+      },
+    }),
+  });
+  const properties: any[] = data?.results?.properties ?? [];
+  return {
+    properties,
+    resultCount:
+      typeof data?.meta?.resultCount === "number"
+        ? data.meta.resultCount
+        : properties.length,
+    resultsFound:
+      typeof data?.meta?.resultsFound === "number"
+        ? data.meta.resultsFound
+        : properties.length,
+  };
+}
+
+/** UI-friendly property shape for the Find Deals screen. */
+export interface SimplifiedProperty {
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  ownerName: string;
+  estimatedValue: number | null;
+  equityPercent: number | null;
+  listingStatus: string | null;
+  /** Human-readable distress labels derived from quickLists flags. */
+  distressFlags: string[];
+  apn: string | null;
+}
+
+const QUICKLIST_LABELS: Record<string, string> = {
+  "absentee-owner": "Absentee Owner",
+  "in-state-absentee-owner": "In-State Absentee",
+  "out-of-state-absentee-owner": "Out-of-State Owner",
+  vacant: "Vacant",
+  "vacant-lot": "Vacant Lot",
+  "mailing-address-vacant": "Vacant Mailing Address",
+  preforeclosure: "Pre-Foreclosure",
+  "tax-default": "Tax Delinquent",
+  "notice-of-default": "Notice of Default",
+  "notice-of-sale": "Notice of Sale",
+  "notice-of-lis-pendens": "Lis Pendens",
+  "active-auction": "Active Auction",
+  "corporate-owned": "Corporate Owned",
+  inherited: "Inherited",
+  "tired-landlord": "Tired Landlord",
+  "high-equity": "High Equity",
+  "free-and-clear": "Free & Clear",
+  "low-equity": "Low Equity",
+  "on-market": "On Market",
+  "active-listing": "Active Listing",
+  "expired-listing": "Expired Listing",
+  "failed-listing": "Failed Listing",
+  "canceled-listing": "Canceled Listing",
+  "pending-listing": "Pending",
+  "for-sale-by-owner": "FSBO",
+  "owner-occupied": "Owner Occupied",
+  "cash-buyer": "Cash Buyer",
+  "senior-owner": "Senior Owner",
+  "trust-owned": "Trust Owned",
+  "has-hoa": "Has HOA",
+  "recently-sold": "Recently Sold",
+};
+
+/**
+ * Reduce a raw BatchData property object to the fields the Find Deals
+ * UI needs. Defensive: the API has shipped field-name variants, so this
+ * checks several known shapes.
+ */
+export function simplifyProperty(raw: any): SimplifiedProperty {
+  const address = raw?.address ?? {};
+  const owner = raw?.owner ?? {};
+  const valuation = raw?.valuation ?? {};
+  const listing = raw?.listing ?? {};
+  const quickLists = raw?.quickLists ?? {};
+
+  const distressFlags: string[] = [];
+  for (const [key, label] of Object.entries(QUICKLIST_LABELS)) {
+    if (quickLists[key] === true) distressFlags.push(label);
+  }
+
+  const num = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  return {
+    street: String(address.street ?? address.streetAddress ?? ""),
+    city: String(address.city ?? ""),
+    state: String(address.state ?? ""),
+    zip: String(address.zip ?? address.zipCode ?? address.postalCode ?? ""),
+    ownerName: String(
+      owner.fullName ?? owner.name ?? owner.ownerName ?? ""
+    ),
+    estimatedValue: num(
+      valuation.estimatedValue ?? valuation.avm ?? valuation.marketValue
+    ),
+    equityPercent: num(valuation.equityPercent ?? valuation.equity),
+    listingStatus: listing.status
+      ? String(listing.status)
+      : listing.statusCategory
+        ? String(listing.statusCategory)
+        : null,
+    distressFlags,
+    apn: raw?.apn ?? address.apn ?? null,
+  };
 }

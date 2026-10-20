@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 
 const navItems = [
   { href: "/dashboard", label: "Pipeline", icon: "📊" },
+  { href: "/find-deals", label: "Find Deals", icon: "🎯" },
   { href: "/leads", label: "Leads", icon: "👥" },
   { href: "/campaigns", label: "Campaigns", icon: "📞" },
   { href: "/call-history", label: "Call History", icon: "🎙️" },
