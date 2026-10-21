@@ -74,6 +74,18 @@ export async function GET(
       contacts: enriched,
       callLogs: logs ?? [],
       counters,
+      // The campaign detail page reads these key names (contactCounters,
+      // callMetrics, status) — keep both spellings so the stats tiles and
+      // Dialed/Connected line render. Without the alias the page computed
+      // every tile as 0 ("0/47" after a finished campaign).
+      contactCounters: counters,
+      callMetrics: {
+        dialed: (logs ?? []).length,
+        connected: (logs ?? []).filter(
+          (l: any) => (l.duration_seconds ?? 0) > 0
+        ).length,
+      },
+      status: (campaign as any)?.status ?? null,
       provider: "elevenlabs",
     };
 
