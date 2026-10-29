@@ -86,7 +86,7 @@ export async function GET(
         ).length,
       },
       status: (campaign as any)?.status ?? null,
-      provider: "elevenlabs",
+      provider: (campaign as any)?.provider ?? "elevenlabs",
     };
 
     return NextResponse.json({ campaign, live, liveError: null });
