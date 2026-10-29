@@ -7,9 +7,11 @@ import { useRouter } from "next/navigation";
 import {
   getProfile,
   updateElevenLabsKeys,
+  updateTwilioKeys,
   updateBatchDataKey,
   getSkipTraceUsageThisMonth,
   elevenLabsConnected,
+  twilioConnected,
   batchdataConnected,
   hasActiveAccess,
   type Profile,
@@ -51,6 +53,13 @@ export default function SettingsPage() {
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [elevenMsg, setElevenMsg] = useState("");
   const [elevenSaving, setElevenSaving] = useState(false);
+
+  // Own dialer (Twilio) form state
+  const [twilioSid, setTwilioSid] = useState("");
+  const [twilioToken, setTwilioToken] = useState("");
+  const [twilioCaller, setTwilioCaller] = useState("");
+  const [twilioMsg, setTwilioMsg] = useState("");
+  const [twilioSaving, setTwilioSaving] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
   // BatchData form state
@@ -79,6 +88,9 @@ export default function SettingsPage() {
           setApiKey(p?.elevenLabsApiKey ?? "");
           setAgentId(p?.elevenLabsAgentId ?? "");
           setPhoneNumberId(p?.elevenLabsPhoneNumberId ?? "");
+          setTwilioSid(p?.twilioAccountSid ?? "");
+          setTwilioToken(p?.twilioAuthToken ?? "");
+          setTwilioCaller(p?.twilioCallerNumber ?? "");
           setBatchKey(p?.batchdataApiKey ?? "");
         })
         .catch(() => {});
@@ -102,6 +114,7 @@ export default function SettingsPage() {
     "Account";
 
   const connected = elevenLabsConnected(profile);
+  const ownDialerConnected = twilioConnected(profile);
   const batchConnected = batchdataConnected(profile);
   const access = hasActiveAccess(profile);
 
@@ -145,6 +158,47 @@ export default function SettingsPage() {
       setElevenMsg(e.message || "Save failed");
     } finally {
       setElevenSaving(false);
+    }
+  };
+
+  const saveTwilio = async () => {
+    setTwilioMsg("");
+    if (!twilioSid.trim() || !twilioToken.trim() || !twilioCaller.trim()) {
+      setTwilioMsg("Fill in all three fields.");
+      return;
+    }
+    setTwilioSaving(true);
+    try {
+      await updateTwilioKeys({
+        accountSid: twilioSid.trim(),
+        authToken: twilioToken.trim(),
+        callerNumber: twilioCaller.trim(),
+      });
+      const p = await getProfile();
+      setProfile(p);
+      setTwilioMsg("✓ Own Dialer (Twilio) connected.");
+    } catch (e: any) {
+      setTwilioMsg(e.message || "Save failed");
+    } finally {
+      setTwilioSaving(false);
+    }
+  };
+
+  const disconnectTwilio = async () => {
+    if (!window.confirm("Disconnect your Twilio account? The Own Dialer will stop working until you reconnect.")) return;
+    setTwilioSaving(true);
+    try {
+      await updateTwilioKeys({ accountSid: null, authToken: null, callerNumber: null });
+      setTwilioSid("");
+      setTwilioToken("");
+      setTwilioCaller("");
+      const p = await getProfile();
+      setProfile(p);
+      setTwilioMsg("Own Dialer (Twilio) disconnected.");
+    } catch (e: any) {
+      setTwilioMsg(e.message || "Disconnect failed");
+    } finally {
+      setTwilioSaving(false);
     }
   };
 
@@ -338,6 +392,78 @@ export default function SettingsPage() {
               AI agent, import your Twilio phone number, then paste the API key,
               agent ID, and phone number ID above. Set the agent's post-call
               webhook to https://www.realestatesolutionz.com/api/elevenlabs-webhook
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-xl">📞</span>
+              <h2 className="text-lg font-semibold">Own Dialer (Twilio)</h2>
+            </div>
+            <p className="mb-4 text-sm text-slate-400">
+              Connect your own Twilio account to power the Own Dialer — the
+              dialer that does not use ElevenLabs. Calls are billed to{" "}
+              <span className="font-semibold text-white">your</span> Twilio
+              account — never shared with other users.{" "}
+              <span
+                className={`font-semibold ${ownDialerConnected ? "text-emerald-400" : "text-amber-400"}`}
+              >
+                {ownDialerConnected ? "● Connected" : "○ Not connected"}
+              </span>
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">Twilio Account SID</label>
+                <input
+                  value={twilioSid}
+                  onChange={(e) => setTwilioSid(e.target.value)}
+                  placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Twilio Auth Token</label>
+                <input
+                  type="password"
+                  value={twilioToken}
+                  onChange={(e) => setTwilioToken(e.target.value)}
+                  placeholder="Auth Token from Twilio Console (click the eye icon to reveal it)"
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Twilio caller number</label>
+                <input
+                  value={twilioCaller}
+                  onChange={(e) => setTwilioCaller(e.target.value)}
+                  placeholder="+1 279-238-6596 (your Twilio number, E.164 format)"
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm"
+                />
+              </div>
+            </div>
+            {twilioMsg && <p className="mt-3 text-sm text-slate-300">{twilioMsg}</p>}
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={saveTwilio}
+                disabled={twilioSaving}
+                className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {twilioSaving ? "Saving…" : ownDialerConnected ? "Update connection" : "Connect Twilio"}
+              </button>
+              {ownDialerConnected && (
+                <button
+                  onClick={disconnectTwilio}
+                  disabled={twilioSaving}
+                  className="rounded-lg border border-red-500/40 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  Disconnect
+                </button>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              Find these in Twilio Console on the home page under Account Info.
+              The Auth Token is hidden behind an eye icon until you click it.
+              The caller number is the Twilio number sellers see.
             </p>
           </div>
 

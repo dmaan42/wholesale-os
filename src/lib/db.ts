@@ -448,6 +448,9 @@ export interface Profile {
   elevenLabsAgentId: string | null;
   elevenLabsPhoneNumberId: string | null;
   batchdataApiKey: string | null;
+  twilioAccountSid: string | null;
+  twilioAuthToken: string | null;
+  twilioCallerNumber: string | null;
   createdAt: string;
 }
 
@@ -479,6 +482,9 @@ function toProfile(r: ProfileRow): Profile {
     elevenLabsAgentId: (r as any).elevenlabs_agent_id ?? null,
     elevenLabsPhoneNumberId: (r as any).elevenlabs_phone_number_id ?? null,
     batchdataApiKey: r.batchdata_api_key,
+    twilioAccountSid: (r as any).twilio_account_sid ?? null,
+    twilioAuthToken: (r as any).twilio_auth_token ?? null,
+    twilioCallerNumber: (r as any).twilio_caller_number ?? null,
     createdAt: r.created_at,
   };
 }
@@ -558,6 +564,33 @@ export function elevenLabsConnected(profile: Profile | null): boolean {
     profile?.elevenLabsApiKey &&
     profile?.elevenLabsAgentId &&
     profile?.elevenLabsPhoneNumberId
+  );
+}
+
+/** Save (or clear, with nulls) the user's own Twilio credentials for the
+ * own dialer (migration 008 columns). */
+export async function updateTwilioKeys(keys: {
+  accountSid?: string | null;
+  authToken?: string | null;
+  callerNumber?: string | null;
+}): Promise<void> {
+  const userId = await requireUserId();
+  const row: Record<string, string | null> = {};
+  if (keys.accountSid !== undefined)
+    row.twilio_account_sid = keys.accountSid || null;
+  if (keys.authToken !== undefined)
+    row.twilio_auth_token = keys.authToken || null;
+  if (keys.callerNumber !== undefined)
+    row.twilio_caller_number = keys.callerNumber || null;
+  const { error } = await sb().from("profiles").update(row).eq("id", userId);
+  if (error) dbError("Failed to save Twilio keys", error);
+}
+
+export function twilioConnected(profile: Profile | null): boolean {
+  return !!(
+    profile?.twilioAccountSid &&
+    profile?.twilioAuthToken &&
+    profile?.twilioCallerNumber
   );
 }
 
