@@ -10,6 +10,7 @@ import {
   applyElevenLabsCallUpdate,
   isElevenLabsTerminal,
 } from "@/lib/elevenlabs-sync";
+import { pumpOwnDialerCampaign } from "@/lib/own-dialer-pump";
 
 /**
  * Server-side campaign pump — shared by the per-campaign endpoint and the
@@ -93,6 +94,7 @@ export async function pumpCampaign(
     user_id: string;
     status: string;
     max_concurrency?: number | null;
+    provider?: string | null;
   },
   userId: string,
   opts?: { budgetMs?: number }
@@ -117,6 +119,13 @@ export async function pumpCampaign(
 
   if (campaign.status === "cancelled" || campaign.status === "completed") {
     return done({ skipped: campaign.status });
+  }
+
+  // Own-dialer campaigns dispatch through Twilio + our own TwiML agent,
+  // not ElevenLabs. Branch before any ElevenLabs credential lookup so a
+  // missing/empty ElevenLabs connection can never block them.
+  if ((campaign as any).provider === "own-dialer") {
+    return pumpOwnDialerCampaign(supabase, campaign, userId, opts);
   }
 
   // Paywall: placing calls requires an active subscription or trial.

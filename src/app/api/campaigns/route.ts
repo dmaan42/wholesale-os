@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiUser, requireActiveSubscription } from "@/lib/api-auth";
 import { toE164, resolveElevenLabsCreds } from "@/lib/elevenlabs";
+import { resolveOwnDialerCreds } from "@/lib/own-dialer";
 
 export const runtime = "nodejs";
 
@@ -22,8 +23,13 @@ export async function GET(req: Request) {
   }
 }
 
-// POST /api/campaigns — create an ElevenLabs batch campaign and queue its audience.
-// Body: { name, leadIds: string[], maxConcurrency?: number }
+// POST /api/campaigns — create a batch campaign and queue its audience.
+// Body: { name, leadIds: string[], maxConcurrency?: number,
+//         provider?: "elevenlabs" | "own-dialer" }
+// provider defaults to "elevenlabs" (existing behavior, unchanged).
+// "own-dialer" dispatches through Twilio + our own TwiML agent instead
+// (see docs/own-dialer.md) and is checked here so a campaign can never
+// be created for a provider the user hasn't connected.
 // ElevenLabs has no native "campaign" object for our use, so we dispatch
 // individual calls and track them via our own campaign row.
 //
@@ -47,12 +53,18 @@ export async function POST(req: Request) {
     // Paywall: launching campaigns requires an active subscription or trial.
     await requireActiveSubscription(supabase, user.id);
 
-    // The caller's own ElevenLabs credentials — billed to their account.
-    // Checked now so a missing connection fails fast, before rows exist.
-    // Throws a user-actionable error when ElevenLabs isn't connected.
-    await resolveElevenLabsCreds(supabase, user.id);
-
     const body = await req.json().catch(() => ({}));
+    const provider =
+      body.provider === "own-dialer" ? "own-dialer" : "elevenlabs";
+    // The caller's own provider credentials — billed to their account.
+    // Checked now so a missing connection fails fast, before rows exist.
+    // Throws a user-actionable error when the provider isn't connected.
+    if (provider === "own-dialer") {
+      await resolveOwnDialerCreds(supabase, user.id);
+    } else {
+      await resolveElevenLabsCreds(supabase, user.id);
+    }
+
     const name = String(body.name || "Untitled campaign").slice(0, 120);
     const leadIds: string[] = Array.isArray(body.leadIds) ? body.leadIds : [];
     const maxConcurrency = Math.min(
@@ -120,7 +132,7 @@ export async function POST(req: Request) {
         status: "running",
         total_contacts: audience.length,
         max_concurrency: maxConcurrency,
-        provider: "elevenlabs",
+        provider,
       })
       .select()
       .single();

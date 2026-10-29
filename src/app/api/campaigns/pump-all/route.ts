@@ -37,7 +37,7 @@ export async function GET(req: Request) {
 
   const { data: campaigns, error } = await supabase
     .from("campaigns")
-    .select("id, user_id, status, max_concurrency")
+    .select("id, user_id, status, max_concurrency, provider")
     .eq("status", "running")
     .order("created_at", { ascending: true })
     .limit(25);
