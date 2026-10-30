@@ -33,8 +33,10 @@ works for campaigns created with `provider: "elevenlabs"`.
    Each spoken answer is appended to `call_logs.transcript` immediately,
    so a mid-call hangup still leaves a partial record.
 4. **Agent rules (same job Alex did):**
-   - Introduces as Darren's automated assistant, calling **on behalf of
+   - Introduces as Alex, calling **on behalf of
      Darren**, a real estate investor. It never claims to be Darren.
+     (No automated/AI disclosure in the greeting, per Darren's
+     2026-10-29 decision to match the original Alex.)
      Voice: Twilio `Polly.Joanna-Neural` (female, en-US) for every
      prompt — no ElevenLabs/Bland/Vapi.
    - Never quotes a specific offer price — it only asks what price the
