@@ -123,14 +123,21 @@ works for campaigns created with `provider: "elevenlabs"`.
   instead of hardcoding "elevenlabs".
 - `supabase/migrations/008_own_dialer.sql` — profiles Twilio columns.
 
-## Not built yet (follow-ups, not blockers for a first test)
+## UI (added on feat/own-dialer-ui — no console or API POST needed)
 
-- No Settings UI fields for the Twilio columns yet — values are set
-  via Supabase / env vars until a Settings section is added.
-- No campaign-page UI toggle for provider yet — campaigns are
-  created as own-dialer by passing `"provider": "own-dialer"` to
-  `POST /api/campaigns`, and single calls go through `/api/own-dial`.
-  The LeadModal "Call" button still posts to `/api/dial` (ElevenLabs).
+- Settings → "Own Dialer (Twilio)" card: Account SID, Auth Token,
+  and caller number, saved to the profiles columns from migration
+  008 (same pattern as the ElevenLabs / BatchData cards).
+- Lead detail (LeadModal): a second button, "Call with Own Dialer",
+  posts to `/api/own-dial` with the lead's id and saved phone and
+  shows the server's error verbatim. The original "Call with AI"
+  button still posts to `/api/dial` (ElevenLabs), unchanged.
+- New campaign modal: a "Dialer" selector (ElevenLabs (Alex) /
+  Own Dialer) that posts `provider` to `/api/campaigns`. It defaults
+  to ElevenLabs, so existing behaviour is unchanged unless
+  Own Dialer is chosen.
+
+## Not built yet (follow-ups, not blockers for a first test)
 - The agent is a scripted one-question-at-a-time TwiML flow using
   Twilio's own speech recognition and voice — deliberately, for
   reliability. It is not a free-form LLM conversation; if Darren wants

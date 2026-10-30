@@ -29,6 +29,7 @@ interface Props {
 export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Props) {
   const [form, setForm] = useState<Partial<Lead>>({});
   const [calling, setCalling] = useState(false);
+  const [callingOwn, setCallingOwn] = useState(false);
   const [callMsg, setCallMsg] = useState("");
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
   const [tracing, setTracing] = useState(false);
@@ -75,6 +76,40 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
       setCallMsg(e.message || "Call failed");
     } finally {
       setCalling(false);
+    }
+  };
+
+  // Own dialer: Twilio + our own TwiML agent, no ElevenLabs. Mirrors
+  // handleCallAI's authenticated fetch, but posts to /api/own-dial and
+  // surfaces the server's error verbatim (including any Twilio error
+  // code/message) instead of a generic failure.
+  const handleCallOwnDialer = async () => {
+    if (!lead) return;
+    if (!lead.phone) {
+      setCallMsg("Add a phone number to the lead first.");
+      return;
+    }
+    setCallingOwn(true);
+    setCallMsg("");
+    try {
+      const res = await fetch("/api/own-dial", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({ leadId: lead.id, phone: lead.phone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Own dialer call failed");
+      setCallMsg("📞 Calling now with Own Dialer — the outcome and recording will appear here when it finishes.");
+      getCallLogs(lead.id).then(setCallLogs).catch(() => {});
+    } catch (e: any) {
+      setCallMsg(e.message || "Own dialer call failed");
+    } finally {
+      setCallingOwn(false);
     }
   };
 
@@ -394,6 +429,13 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
               className="flex items-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-60"
             >
               {calling ? "Dialing…" : "📞 Call with AI"}
+            </button>
+            <button
+              onClick={handleCallOwnDialer}
+              disabled={callingOwn}
+              className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-60"
+            >
+              {callingOwn ? "Dialing…" : "📞 Call with Own Dialer"}
             </button>
             <button
               onClick={handleSkipTrace}

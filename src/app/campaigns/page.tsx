@@ -39,6 +39,7 @@ export default function CampaignsPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [concurrency, setConcurrency] = useState(1);
+  const [provider, setProvider] = useState<"elevenlabs" | "own-dialer">("elevenlabs");
   const [startMode, setStartMode] = useState<"now" | "later">("now");
   const [startAt, setStartAt] = useState("");
   const [launching, setLaunching] = useState(false);
@@ -122,6 +123,7 @@ export default function CampaignsPage() {
           name: name || "Untitled campaign",
           leadIds: [...selected],
           maxConcurrency: concurrency,
+          provider,
           ...(earliestAt ? { earliestAt } : {}),
         }),
       });
@@ -129,6 +131,7 @@ export default function CampaignsPage() {
       if (!res.ok) throw new Error(data.error || "Launch failed");
       setModalOpen(false);
       setName("");
+      setProvider("elevenlabs");
       setSelected(new Set());
       setQuery("");
       router.push(`/campaigns/${data.campaignId}`);
@@ -210,6 +213,26 @@ export default function CampaignsPage() {
                 placeholder="e.g. Memphis 38118 — October batch"
                 className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5"
               />
+
+              <div>
+                <label className="block text-sm text-slate-400">
+                  Dialer
+                </label>
+                <select
+                  value={provider}
+                  onChange={(e) =>
+                    setProvider(e.target.value as "elevenlabs" | "own-dialer")
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5"
+                >
+                  <option value="elevenlabs">ElevenLabs (Alex)</option>
+                  <option value="own-dialer">Own Dialer (Twilio + own agent, no ElevenLabs)</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Own Dialer needs your Twilio credentials in Settings first;
+                  ElevenLabs needs your ElevenLabs connection.
+                </p>
+              </div>
 
               <div className="mt-4 grid grid-cols-2 gap-4">
                 <div>
