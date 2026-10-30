@@ -37,6 +37,10 @@ works for campaigns created with `provider: "elevenlabs"`.
      Darren**, a real estate investor. It never claims to be Darren.
      (No automated/AI disclosure in the greeting, per Darren's
      2026-10-29 decision to match the original Alex.)
+   - Missing lead fields are OMITTED, never spoken as fake values:
+     a blank city drops the "who buys houses in ..." location clause,
+     and a blank address drops the "at ..." clause (2026-10-30 Eden
+     fix — a blank address previously rendered as "at your property").
      Voice: Twilio `Polly.Joanna-Neural` (female, en-US) for every
      prompt — no ElevenLabs/Bland/Vapi.
    - Never quotes a specific offer price — it only asks what price the
