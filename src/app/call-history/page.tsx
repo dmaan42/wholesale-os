@@ -39,13 +39,44 @@ function formatDate(iso: string): string {
 
 export default function CallHistoryPage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Recording playback via the authenticated proxy (see LeadModal):
+  // raw provider URLs are not playable directly from a browser.
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioFor, setAudioFor] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState("");
+
+  const playRecording = async (providerCallId: string) => {
+    if (audioFor === providerCallId && audioUrl) {
+      setAudioFor(null);
+      setAudioUrl(null);
+      return;
+    }
+    setAudioError("");
+    try {
+      const res = await fetch(
+        `/api/call-logs/recording?providerCallId=${encodeURIComponent(providerCallId)}`,
+        {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        }
+      );
+      if (!res.ok) throw new Error("Recording unavailable");
+      const blob = await res.blob();
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      setAudioUrl(URL.createObjectURL(blob));
+      setAudioFor(providerCallId);
+    } catch {
+      setAudioError("Recording unavailable for this call.");
+    }
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -170,7 +201,24 @@ export default function CallHistoryPage() {
                         {c.recordingUrl && (
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recording</p>
-                            <audio controls src={c.recordingUrl} className="mt-1 w-full" />
+                            {c.providerCallId ? (
+                              <>
+                                <button
+                                  onClick={() => playRecording(c.providerCallId as string)}
+                                  className="mt-1 text-sm text-emerald-400 hover:underline"
+                                >
+                                  ▶ Play recording
+                                </button>
+                                {audioFor === c.providerCallId && audioUrl && (
+                                  <audio controls src={audioUrl} className="mt-1 w-full" />
+                                )}
+                                {audioError && (
+                                  <p className="mt-1 text-xs text-red-400">{audioError}</p>
+                                )}
+                              </>
+                            ) : (
+                              <audio controls src={c.recordingUrl} className="mt-1 w-full" />
+                            )}
                           </div>
                         )}
                         {!c.summary && !c.recordingUrl && (

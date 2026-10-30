@@ -79,8 +79,8 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
   switch (step) {
     case "greeting":
       return (
-        `Hi ${nameOrFallback(ctx)}, this is an automated call on behalf of ` +
-        `Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
+        `Hi ${nameOrFallback(ctx)}, this is Darren's automated assistant, ` +
+        `calling on behalf of Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
         `I'm calling about your property at ${ctx.address || "your property"}.`
       );
     case "motivation":
@@ -99,8 +99,8 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
 /** Voicemail message. Callback number is Darren's real number, never invented. */
 export function voicemailMessage(ctx: LeadContext): string {
   return (
-    `Hi ${nameOrFallback(ctx)}, this is an automated message on behalf of ` +
-    `Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
+    `Hi ${nameOrFallback(ctx)}, this is Darren's automated assistant, ` +
+    `calling on behalf of Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
     `We're calling about your property at ${ctx.address || "your property"}. ` +
     `If you're open to talking about selling, please call Darren back at ` +
     `${CALLBACK_NUMBER}. Thanks, and have a good day.`

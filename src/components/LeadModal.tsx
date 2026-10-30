@@ -32,6 +32,12 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
   const [callingOwn, setCallingOwn] = useState(false);
   const [callMsg, setCallMsg] = useState("");
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
+  // Recording playback: fetched via the authenticated proxy
+  // (/api/call-logs/recording) and played from a blob URL — a raw
+  // provider URL can't be played directly (Twilio URLs need Basic Auth,
+  // ElevenLabs URLs are short-lived signed URLs).
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioFor, setAudioFor] = useState<string | null>(null);
   const [tracing, setTracing] = useState(false);
   const [traceMsg, setTraceMsg] = useState("");
   const [tracePersons, setTracePersons] = useState<TracePerson[]>([]);
@@ -110,6 +116,31 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
       setCallMsg(e.message || "Own dialer call failed");
     } finally {
       setCallingOwn(false);
+    }
+  };
+
+  const playRecording = async (providerCallId: string) => {
+    if (audioFor === providerCallId && audioUrl) {
+      setAudioFor(null);
+      setAudioUrl(null);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/call-logs/recording?providerCallId=${encodeURIComponent(providerCallId)}`,
+        {
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {},
+        }
+      );
+      if (!res.ok) throw new Error("Recording unavailable");
+      const blob = await res.blob();
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      setAudioUrl(URL.createObjectURL(blob));
+      setAudioFor(providerCallId);
+    } catch {
+      setCallMsg("Recording unavailable for this call.");
     }
   };
 
@@ -386,10 +417,22 @@ export default function LeadModal({ lead, open, onClose, onSave, onDelete }: Pro
                         {new Date(c.createdAt).toLocaleDateString()} · {c.status}
                         {c.durationSeconds > 0 && ` · ${c.durationSeconds}s`}
                       </span>
-                      {c.recordingUrl && (
-                        <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
+                      {c.providerCallId ? (
+                        <button
+                          onClick={() => playRecording(c.providerCallId as string)}
+                          className="text-emerald-400 hover:underline"
+                        >
                           ▶ Recording
-                        </a>
+                        </button>
+                      ) : (
+                        c.recordingUrl && (
+                          <a href={c.recordingUrl} target="_blank" rel="noreferrer" className="text-emerald-400 hover:underline">
+                            ▶ Recording
+                          </a>
+                        )
+                      )}
+                      {audioFor === c.providerCallId && audioUrl && (
+                        <audio controls src={audioUrl} className="mt-1 w-full" />
                       )}
                     </div>
                     {(c.outcome || c.summary) && (
