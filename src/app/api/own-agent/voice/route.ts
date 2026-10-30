@@ -54,7 +54,14 @@ function say(text: string): string {
   // Natural Neural voice (female, to match Alex), Twilio-only — no
   // ElevenLabs/Bland/Vapi. Every prompt, voicemail, and wrap-up goes
   // through this helper, so the whole agent uses the same voice.
-  return `<Say voice="Polly.Joanna-Neural" language="en-US">${twimlEscape(text)}</Say>`;
+  // Prosody tuning (2026-10-29, per Darren's feedback that Joanna was
+  // "a little too mellow" vs the original Alex): slightly faster and
+  // slightly higher-pitched for a livelier, more energetic delivery,
+  // kept moderate so it does not sound rushed or chipmunk-like.
+  return (
+    `<Say voice="Polly.Joanna-Neural" language="en-US">` +
+    `<prosody rate="108%" pitch="+4%">${twimlEscape(text)}</prosody></Say>`
+  );
 }
 
 function gather(
