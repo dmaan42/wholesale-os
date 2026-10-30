@@ -51,7 +51,10 @@ function twiml(body: string): NextResponse {
 }
 
 function say(text: string): string {
-  return `<Say>${twimlEscape(text)}</Say>`;
+  // Natural Neural voice (female, to match Alex), Twilio-only — no
+  // ElevenLabs/Bland/Vapi. Every prompt, voicemail, and wrap-up goes
+  // through this helper, so the whole agent uses the same voice.
+  return `<Say voice="Polly.Joanna-Neural" language="en-US">${twimlEscape(text)}</Say>`;
 }
 
 function gather(

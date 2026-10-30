@@ -227,6 +227,7 @@ export interface CallLog {
   summary: string | null;
   outcome: string | null;
   provider: string | null;
+  providerCallId: string | null;
   createdAt: string;
 }
 
@@ -241,6 +242,7 @@ interface CallLogRow {
   summary: string | null;
   outcome: string | null;
   provider: string | null;
+  provider_call_id: string | null;
   created_at: string;
 }
 
@@ -256,6 +258,7 @@ function toCallLog(r: CallLogRow): CallLog {
     summary: r.summary,
     outcome: r.outcome,
     provider: r.provider,
+    providerCallId: r.provider_call_id ?? null,
     createdAt: r.created_at,
   };
 }

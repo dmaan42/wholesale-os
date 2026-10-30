@@ -33,8 +33,12 @@ works for campaigns created with `provider: "elevenlabs"`.
    Each spoken answer is appended to `call_logs.transcript` immediately,
    so a mid-call hangup still leaves a partial record.
 4. **Agent rules (same job Alex did):**
-   - Introduces as an automated call **on behalf of Darren**, a real
-     estate investor. It never claims to be Darren.
+   - Introduces as Alex, calling **on behalf of
+     Darren**, a real estate investor. It never claims to be Darren.
+     (No automated/AI disclosure in the greeting, per Darren's
+     2026-10-29 decision to match the original Alex.)
+     Voice: Twilio `Polly.Joanna-Neural` (female, en-US) for every
+     prompt — no ElevenLabs/Bland/Vapi.
    - Never quotes a specific offer price — it only asks what price the
      seller is hoping for.
    - A removal request ("do not call", "remove me", …) ends the call
@@ -56,9 +60,14 @@ works for campaigns created with `provider: "elevenlabs"`.
    in-progress → completed / busy / failed / no-answer with duration,
    and moves the campaign contact row to match. It never overwrites a
    disposition the voice agent already recorded. The recording callback
-   (`POST /api/own-agent/recording`) stores `recording_url`, so the
-   campaign page's player has a real recording instead of
-   "Recording unavailable".
+   (`POST /api/own-agent/recording`) stores `recording_url`, and
+   playback goes through the authenticated proxy
+   (`GET /api/call-logs/recording?providerCallId=…`), which streams
+   Twilio recordings with the user's own Twilio credentials — a raw
+   Twilio recording URL needs Basic Auth and cannot be played directly
+   from a browser (that was why the 2026-10-29 test recording showed
+   0:00 / blank tab). The campaign page, lead modal, and call history
+   all play via that proxy.
 7. **Stale calls:** a contact still in-flight after 30 minutes with no
    terminal Twilio status is marked failed with that reason, so a dead
    call can't wedge a campaign (the same guard the ElevenLabs pump has).
