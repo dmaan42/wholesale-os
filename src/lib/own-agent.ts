@@ -56,12 +56,42 @@ export interface LeadContext {
   city: string;
 }
 
-function nameOrFallback(ctx: LeadContext): string {
-  return ctx.ownerName || "there";
+/** Trimmed field, or "" when blank / whitespace-only. Blank is never
+ * spoken as a fake value (see below). */
+function clean(v: string | undefined | null): string {
+  return (v || "").trim();
 }
 
-function cityOrFallback(ctx: LeadContext): string {
-  return ctx.city || "your area";
+function nameOrFallback(ctx: LeadContext): string {
+  return clean(ctx.ownerName) || "there";
+}
+
+/**
+ * Investor clause with the location OMITTED when city is blank, never
+ * spoken as "your area".
+ *  - city present: "a real estate investor who buys houses in Jacksonville"
+ *  - city blank:   "a real estate investor who buys houses"
+ */
+function investorClause(ctx: LeadContext): string {
+  const city = clean(ctx.city);
+  return city
+    ? `a real estate investor who buys houses in ${city}`
+    : "a real estate investor who buys houses";
+}
+
+/**
+ * Property clause with the "at ..." part OMITTED when address is blank,
+ * never spoken as "at your property" (the 2026-10-30 Eden bug: a blank
+ * address rendered as "your property at your property").
+ *  - address present: "I'm calling about your property at 5744 Round Table Rd"
+ *  - address blank:   "I'm calling about your property"
+ */
+function propertyClause(ctx: LeadContext, firstPerson: boolean): string {
+  const address = clean(ctx.address);
+  const verb = firstPerson ? "I'm calling" : "We're calling";
+  return address
+    ? `${verb} about your property at ${address}`
+    : `${verb} about your property`;
 }
 
 /** Escape text for inclusion in TwiML <Say> / attribute values. */
@@ -80,8 +110,8 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
     case "greeting":
       return (
         `Hi ${nameOrFallback(ctx)}, this is Alex, ` +
-        `calling on behalf of Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
-        `I'm calling about your property at ${ctx.address || "your property"}.`
+        `calling on behalf of Darren, ${investorClause(ctx)}. ` +
+        `${propertyClause(ctx, true)}.`
       );
     case "motivation":
       return "Are you considering selling that property, and if so, what has you thinking about selling?";
@@ -100,8 +130,8 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
 export function voicemailMessage(ctx: LeadContext): string {
   return (
     `Hi ${nameOrFallback(ctx)}, this is Alex, ` +
-    `calling on behalf of Darren, a real estate investor who buys houses in ${cityOrFallback(ctx)}. ` +
-    `We're calling about your property at ${ctx.address || "your property"}. ` +
+    `calling on behalf of Darren, ${investorClause(ctx)}. ` +
+    `${propertyClause(ctx, false)}. ` +
     `If you're open to talking about selling, please call Darren back at ` +
     `${CALLBACK_NUMBER}. Thanks, and have a good day.`
   );
