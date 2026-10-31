@@ -121,6 +121,18 @@ export interface OwnDialerCallOptions {
   to: string;
   /** Call log row id — carried in webhook query params. */
   callLogId: string;
+  /**
+   * Lead fields known at dial time (from the leads row the caller just
+   * loaded). Carried in the voice webhook query as a fallback, because
+   * the 2026-10-30 Eden/test calls proved the voice route's DB lookup
+   * can come up blank for a row the UI shows as populated — and a
+   * silent blank context used to be spoken as a fake value, then as a
+   * generic greeting. The voice route prefers the DB row; it only uses
+   * these params when the DB row is missing or blank. Never a secret.
+   */
+  leadName?: string;
+  leadAddress?: string;
+  leadCity?: string;
 }
 
 /**
@@ -135,7 +147,14 @@ export async function createOwnDialerCall(
   opts: OwnDialerCallOptions
 ): Promise<TwilioCallResult> {
   const origin = appOrigin();
-  const voiceUrl = `${origin}/api/own-agent/voice?callLogId=${encodeURIComponent(opts.callLogId)}&step=greeting`;
+  const voiceParams = new URLSearchParams({
+    callLogId: opts.callLogId,
+    step: "greeting",
+  });
+  if (opts.leadName) voiceParams.set("leadName", opts.leadName);
+  if (opts.leadAddress) voiceParams.set("leadAddress", opts.leadAddress);
+  if (opts.leadCity) voiceParams.set("leadCity", opts.leadCity);
+  const voiceUrl = `${origin}/api/own-agent/voice?${voiceParams.toString()}`;
   const statusUrl = `${origin}/api/own-agent/status`;
   const recordingUrl = `${origin}/api/own-agent/recording`;
 

@@ -104,6 +104,9 @@ export async function POST(req: Request) {
       const { callSid } = await createOwnDialerCall(creds, {
         to: e164,
         callLogId: (log as any).id,
+        leadName: (lead as any).owner_name || "",
+        leadAddress: (lead as any).address || "",
+        leadCity: (lead as any).city || "",
       });
       await supabase
         .from("call_logs")

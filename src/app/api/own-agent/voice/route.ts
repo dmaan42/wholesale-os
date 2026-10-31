@@ -140,9 +140,17 @@ export async function POST(req: Request) {
     }
   }
 
+  // Greeting context: DB first, dial-time query params as fallback.
+  // 2026-10-30 root-cause note: the Eden and test calls both spoke a
+  // generic greeting for rows the UI showed as populated. The old code
+  // ignored the lead query's error entirely, so a failed/empty lookup
+  // silently became a blank context. Now a DB failure is recorded in
+  // the call transcript (never spoken), and the fields the dialer
+  // already loaded at dial time are used instead of a blank context.
   let ctx: LeadContext = { ownerName: "", address: "", city: "" };
+  let ctxSource = "none";
   if ((log as any).lead_id) {
-    const { data: lead } = await supabase
+    const { data: lead, error: leadErr } = await supabase
       .from("leads")
       .select("owner_name, address, city")
       .eq("id", (log as any).lead_id)
@@ -153,7 +161,36 @@ export async function POST(req: Request) {
         address: (lead as any).address || "",
         city: (lead as any).city || "",
       };
+      ctxSource = "db";
+    } else if (leadErr) {
+      await supabase
+        .from("call_logs")
+        .update({
+          transcript:
+            ((log as any).transcript || "") +
+            `\n[Greeting context: DB lead lookup failed for lead_id ${(log as any).lead_id}: ${leadErr.message}]`,
+        })
+        .eq("id", callLogId);
     }
+  }
+  if (!ctx.ownerName && !ctx.address && !ctx.city) {
+    const qName = url.searchParams.get("leadName") || "";
+    const qAddress = url.searchParams.get("leadAddress") || "";
+    const qCity = url.searchParams.get("leadCity") || "";
+    if (qName || qAddress || qCity) {
+      ctx = { ownerName: qName, address: qAddress, city: qCity };
+      ctxSource = "dial-time-fallback";
+    }
+  }
+  if (step === "greeting" && ctxSource !== "db") {
+    await supabase
+      .from("call_logs")
+      .update({
+        transcript:
+          ((log as any).transcript || "") +
+          `\n[Greeting context source: ${ctxSource} for lead_id ${(log as any).lead_id || "none"}]`,
+      })
+      .eq("id", callLogId);
   }
 
   // --- Voicemail: machine detection fired on the first request. -------

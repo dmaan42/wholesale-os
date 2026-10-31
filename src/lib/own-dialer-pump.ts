@@ -224,6 +224,7 @@ export async function pumpOwnDialerCampaign(
           const { callSid } = await createOwnDialerCall(creds, {
             to: dialable,
             callLogId: logId,
+            leadName: (q as any).name || "",
           });
           await supabase
             .from("call_logs")
