@@ -81,6 +81,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
 
+    // Recipient type (migration 009): best-effort, so single calls keep
+    // working exactly as before until the column exists — a missing
+    // column just means the owner script.
+    let recipientType: "owner" | "agent" | undefined;
+    const { data: rt } = await supabase
+      .from("leads")
+      .select("recipient_type")
+      .eq("id", leadId)
+      .single();
+    const rtVal = (rt as any)?.recipient_type;
+    if (rtVal === "agent" || rtVal === "owner") recipientType = rtVal;
+
     const { data: log, error: logErr } = await supabase
       .from("call_logs")
       .insert({
@@ -107,6 +119,7 @@ export async function POST(req: Request) {
         leadName: (lead as any).owner_name || "",
         leadAddress: (lead as any).address || "",
         leadCity: (lead as any).city || "",
+        recipientType,
       });
       await supabase
         .from("call_logs")
