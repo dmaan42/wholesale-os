@@ -15,6 +15,10 @@ export interface Lead {
   state: string;
   zip: string;
   ownerName: string;
+  /** Who the dialer is calling for this lead: the property owner
+   * (default) or the listing agent. Agents get a different greeting
+   * and seller-directed questions (see own-agent.ts). */
+  recipientType?: "owner" | "agent";
   phone: string;
   email: string;
   motivation: string;

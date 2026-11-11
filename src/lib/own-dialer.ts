@@ -133,6 +133,13 @@ export interface OwnDialerCallOptions {
   leadName?: string;
   leadAddress?: string;
   leadCity?: string;
+  /**
+   * Who is being called (migration 009 column on leads). Carried in
+   * the voice webhook query like the other lead fields, so the voice
+   * route can greet a listing agent correctly even when its DB
+   * lookup of the column is unavailable.
+   */
+  recipientType?: "owner" | "agent";
 }
 
 /**
@@ -154,6 +161,7 @@ export async function createOwnDialerCall(
   if (opts.leadName) voiceParams.set("leadName", opts.leadName);
   if (opts.leadAddress) voiceParams.set("leadAddress", opts.leadAddress);
   if (opts.leadCity) voiceParams.set("leadCity", opts.leadCity);
+  if (opts.recipientType) voiceParams.set("recipientType", opts.recipientType);
   const voiceUrl = `${origin}/api/own-agent/voice?${voiceParams.toString()}`;
   const statusUrl = `${origin}/api/own-agent/status`;
   const recordingUrl = `${origin}/api/own-agent/recording`;

@@ -66,9 +66,14 @@ function say(text: string): string {
 function gather(
   callLogId: string,
   step: AgentStep,
-  prompt: string
+  prompt: string,
+  recipientType?: "owner" | "agent"
 ): string {
-  const action = `/api/own-agent/voice?callLogId=${encodeURIComponent(callLogId)}&step=${step}`;
+  let action = `/api/own-agent/voice?callLogId=${encodeURIComponent(callLogId)}&step=${step}`;
+  // Carry the recipient type through every Gather step: the voice
+  // route resolves it per request, and later steps would otherwise
+  // lose the dial-time value and fall back to the owner script.
+  if (recipientType === "agent") action += "&recipientType=agent";
   return (
     `<Gather input="speech" speechTimeout="auto" timeout="8" ` +
     `action="${twimlEscape(action)}" method="POST" actionOnEmptyResult="true">` +
@@ -182,6 +187,24 @@ export async function POST(req: Request) {
       ctxSource = "dial-time-fallback";
     }
   }
+  // Recipient type: DB first (migration 009), dial-time query param as
+  // fallback. The column read is best-effort and separate from the
+  // name/address/city lookup above, so calls keep working exactly as
+  // before until migration 009 is applied — a missing column just
+  // means "owner", never a failed call.
+  if (!ctx.recipientType && (log as any).lead_id) {
+    const { data: rt } = await supabase
+      .from("leads")
+      .select("recipient_type")
+      .eq("id", (log as any).lead_id)
+      .single();
+    const v = (rt as any)?.recipient_type;
+    if (v === "agent" || v === "owner") ctx.recipientType = v;
+  }
+  if (!ctx.recipientType) {
+    const qRt = url.searchParams.get("recipientType");
+    if (qRt === "agent" || qRt === "owner") ctx.recipientType = qRt;
+  }
   if (step === "greeting" && ctxSource !== "db") {
     await supabase
       .from("call_logs")
@@ -210,7 +233,7 @@ export async function POST(req: Request) {
   // --- Greeting: introduce, then ask the first question. --------------
   if (step === "greeting") {
     return twiml(
-      `${say(stepPrompt("greeting", ctx))}${gather(callLogId, "motivation", stepPrompt("motivation", ctx))}`
+      `${say(stepPrompt("greeting", ctx))}${gather(callLogId, "motivation", stepPrompt("motivation", ctx), ctx.recipientType)}`
     );
   }
 
@@ -304,5 +327,5 @@ export async function POST(req: Request) {
     .from("call_logs")
     .update({ transcript })
     .eq("id", callLogId);
-  return twiml(gather(callLogId, next, stepPrompt(next, ctx)));
+  return twiml(gather(callLogId, next, stepPrompt(next, ctx), ctx.recipientType));
 }

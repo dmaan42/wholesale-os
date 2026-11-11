@@ -18,6 +18,7 @@ interface LeadRow {
   state: string | null;
   zip: string | null;
   owner_name: string | null;
+  recipient_type?: string | null;
   phone: string | null;
   email: string | null;
   motivation: string | null;
@@ -52,6 +53,10 @@ function toLead(r: LeadRow): Lead {
     state: r.state ?? "",
     zip: r.zip ?? "",
     ownerName: r.owner_name ?? "",
+    recipientType:
+      r.recipient_type === "agent" || r.recipient_type === "owner"
+        ? r.recipient_type
+        : "owner",
     phone: r.phone ?? "",
     email: r.email ?? "",
     motivation: r.motivation ?? "",
@@ -109,27 +114,46 @@ export async function addLead(
   lead: Omit<Lead, "id" | "createdAt" | "updatedAt">
 ): Promise<Lead> {
   const user_id = await requireUserId();
-  const { data, error } = await sb()
+  const insertRow: Record<string, unknown> = {
+    user_id,
+    address: lead.address,
+    city: lead.city,
+    state: lead.state,
+    zip: lead.zip,
+    owner_name: lead.ownerName,
+    phone: lead.phone,
+    email: lead.email,
+    motivation: lead.motivation,
+    status: lead.status,
+    source: lead.source,
+    arv: lead.arv,
+    repair_estimate: lead.repairEstimate,
+    offer_price: lead.offerPrice,
+    notes: lead.notes,
+  };
+  if (lead.recipientType !== undefined) {
+    insertRow.recipient_type = lead.recipientType;
+  }
+  let { data, error } = await sb()
     .from("leads")
-    .insert({
-      user_id,
-      address: lead.address,
-      city: lead.city,
-      state: lead.state,
-      zip: lead.zip,
-      owner_name: lead.ownerName,
-      phone: lead.phone,
-      email: lead.email,
-      motivation: lead.motivation,
-      status: lead.status,
-      source: lead.source,
-      arv: lead.arv,
-      repair_estimate: lead.repairEstimate,
-      offer_price: lead.offerPrice,
-      notes: lead.notes,
-    })
+    .insert(insertRow)
     .select()
     .single();
+  // Pre-migration tolerance (migration 009): if the recipient_type
+  // column does not exist yet, retry the same insert without it
+  // instead of failing the add.
+  if (
+    error &&
+    insertRow.recipient_type !== undefined &&
+    /recipient_type/i.test(error.message || "")
+  ) {
+    delete insertRow.recipient_type;
+    ({ data, error } = await sb()
+      .from("leads")
+      .insert(insertRow)
+      .select()
+      .single());
+  }
   if (error || !data) dbError("Failed to add lead", error);
   return toLead(data as LeadRow);
 }
@@ -144,6 +168,8 @@ export async function updateLead(
   if (updates.state !== undefined) row.state = updates.state;
   if (updates.zip !== undefined) row.zip = updates.zip;
   if (updates.ownerName !== undefined) row.owner_name = updates.ownerName;
+  if (updates.recipientType !== undefined)
+    row.recipient_type = updates.recipientType;
   if (updates.phone !== undefined) row.phone = updates.phone;
   if (updates.email !== undefined) row.email = updates.email;
   if (updates.motivation !== undefined) row.motivation = updates.motivation;
@@ -154,12 +180,28 @@ export async function updateLead(
   if (updates.offerPrice !== undefined) row.offer_price = updates.offerPrice;
   if (updates.notes !== undefined) row.notes = updates.notes;
 
-  const { data, error } = await sb()
+  let { data, error } = await sb()
     .from("leads")
     .update(row)
     .eq("id", id)
     .select()
     .single();
+  // Pre-migration tolerance (migration 009): if the recipient_type
+  // column does not exist yet, retry the same update without it
+  // instead of failing the save.
+  if (
+    error &&
+    row.recipient_type !== undefined &&
+    /recipient_type/i.test(error.message || "")
+  ) {
+    delete row.recipient_type;
+    ({ data, error } = await sb()
+      .from("leads")
+      .update(row)
+      .eq("id", id)
+      .select()
+      .single());
+  }
   if (error) {
     if (error.code === "PGRST116") return null;
     dbError("Failed to update lead", error);

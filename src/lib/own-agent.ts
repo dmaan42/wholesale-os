@@ -14,6 +14,11 @@
  * gets NO disposition — its summary says so plainly — instead of a
  * guessed "hot" or "interested" tag. That rule exists because AI outcome
  * tags were previously verified wrong against real call summaries.
+ *
+ * Recipient type (LeadContext.recipientType, migration 009): when the
+ * contact is a LISTING AGENT, the greeting and questions address the
+ * seller through the agent ("your listing", "is your seller still
+ * looking to sell"). The owner script is frozen word-for-word.
  */
 import { CALLBACK_NUMBER } from "./own-dialer";
 
@@ -54,6 +59,19 @@ export interface LeadContext {
   ownerName: string;
   address: string;
   city: string;
+  /**
+   * Who is being called: the property owner (default) or the listing
+   * agent. An agent is greeted about "your listing" and asked about
+   * the SELLER (motivation, timeline, price flexibility, condition) —
+   * never "your property" and never "are you considering selling".
+   * The owner wording is frozen (Darren, 2026-10-30): do not change
+   * a word of the owner prompts.
+   */
+  recipientType?: "owner" | "agent";
+}
+
+export function isAgentRecipient(ctx: LeadContext): boolean {
+  return ctx.recipientType === "agent";
 }
 
 /** Trimmed field, or "" when blank / whitespace-only. Blank is never
@@ -83,15 +101,16 @@ function investorClause(ctx: LeadContext): string {
  * Property clause with the "at ..." part OMITTED when address is blank,
  * never spoken as "at your property" (the 2026-10-30 Eden bug: a blank
  * address rendered as "your property at your property").
- *  - address present: "I'm calling about your property at 5744 Round Table Rd"
- *  - address blank:   "I'm calling about your property"
+ *  - owner, address present: "I'm calling about your property at 5744 Round Table Rd"
+ *  - owner, address blank:   "I'm calling about your property"
+ *  - agent, address present: "I'm calling about your listing at 1074 Burke St"
+ *  - agent, address blank:   "I'm calling about your listing"
  */
 function propertyClause(ctx: LeadContext, firstPerson: boolean): string {
   const address = clean(ctx.address);
   const verb = firstPerson ? "I'm calling" : "We're calling";
-  return address
-    ? `${verb} about your property at ${address}`
-    : `${verb} about your property`;
+  const thing = isAgentRecipient(ctx) ? "your listing" : "your property";
+  return address ? `${verb} about ${thing} at ${address}` : `${verb} about ${thing}`;
 }
 
 /** Escape text for inclusion in TwiML <Say> / attribute values. */
@@ -104,8 +123,11 @@ export function twimlEscape(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/** The spoken prompt for each step (greeting is a statement, not a question). */
+/** The spoken prompt for each step (greeting is a statement, not a question).
+ * Owner prompts are frozen word-for-word. Agent prompts ask about the
+ * SELLER, never about the agent as if they owned the property. */
 export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
+  const agent = isAgentRecipient(ctx);
   switch (step) {
     case "greeting":
       return (
@@ -114,13 +136,21 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
         `${propertyClause(ctx, true)}.`
       );
     case "motivation":
-      return "Are you considering selling that property, and if so, what has you thinking about selling?";
+      return agent
+        ? "Is your seller still looking to sell, and what's motivating them to sell?"
+        : "Are you considering selling that property, and if so, what has you thinking about selling?";
     case "timeline":
-      return "If you did sell, how soon would you want that to happen?";
+      return agent
+        ? "If the right buyer came along, how soon would your seller want to close?"
+        : "If you did sell, how soon would you want that to happen?";
     case "price":
-      return "What price would you be hoping to get for the property?";
+      return agent
+        ? "Is the list price firm, or is there room to work with an investor offer?"
+        : "What price would you be hoping to get for the property?";
     case "condition":
-      return "How would you describe the general condition of the property?";
+      return agent
+        ? "How would you describe the condition of the property — what kind of work does it need?"
+        : "How would you describe the general condition of the property?";
     case "wrapup":
       return "";
   }
@@ -128,6 +158,15 @@ export function stepPrompt(step: AgentStep, ctx: LeadContext): string {
 
 /** Voicemail message. Callback number is Darren's real number, never invented. */
 export function voicemailMessage(ctx: LeadContext): string {
+  if (isAgentRecipient(ctx)) {
+    return (
+      `Hi ${nameOrFallback(ctx)}, this is Alex, ` +
+      `calling on behalf of Darren, ${investorClause(ctx)}. ` +
+      `${propertyClause(ctx, false)}. ` +
+      `If your seller is open to an investor offer, please call Darren back at ` +
+      `${CALLBACK_NUMBER}. Thanks, and have a good day.`
+    );
+  }
   return (
     `Hi ${nameOrFallback(ctx)}, this is Alex, ` +
     `calling on behalf of Darren, ${investorClause(ctx)}. ` +

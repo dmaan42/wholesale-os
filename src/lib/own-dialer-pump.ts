@@ -221,10 +221,29 @@ export async function pumpOwnDialerCampaign(
               .eq("id", q.id);
             continue;
           }
+          // Recipient type (migration 009): best-effort read from the
+          // lead row, so campaign calls greet listing agents correctly.
+          // A missing column (migration not yet applied) just means the
+          // owner script — never a failed dispatch.
+          let recipientType: "owner" | "agent" | undefined;
+          if (q.lead_id) {
+            try {
+              const { data: rt } = await supabase
+                .from("leads")
+                .select("recipient_type")
+                .eq("id", q.lead_id)
+                .single();
+              const v = (rt as any)?.recipient_type;
+              if (v === "agent" || v === "owner") recipientType = v;
+            } catch {
+              // Column missing or lookup failed: owner script.
+            }
+          }
           const { callSid } = await createOwnDialerCall(creds, {
             to: dialable,
             callLogId: logId,
             leadName: (q as any).name || "",
+            recipientType,
           });
           await supabase
             .from("call_logs")
