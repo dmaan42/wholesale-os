@@ -221,28 +221,48 @@ export async function pumpOwnDialerCampaign(
               .eq("id", q.id);
             continue;
           }
-          // Recipient type (migration 009): best-effort read from the
-          // lead row, so campaign calls greet listing agents correctly.
-          // A missing column (migration not yet applied) just means the
-          // owner script — never a failed dispatch.
+          // Greeting context (migration 009 + the 2026-10-30 greeting
+          // fix): best-effort read of the lead row at dispatch time, so
+          // campaign calls carry the SAME dial-time fallback the single
+          // call route (/api/own-dial) passes — name, address, city and
+          // recipient type. The voice route prefers its own DB lookup
+          // and only uses these params when that lookup comes up blank,
+          // but until 2026-11-13 the pump passed only the name and
+          // recipient type, so a blank DB context on a campaign call
+          // was spoken as a generic greeting that never named the
+          // property (recording-verified 2026-11-11 to 2026-11-13:
+          // Oak Hall, Tamika Little, Ness — agents kept asking
+          // "which property?"). A missing column (migration not yet
+          // applied) just means the owner script — never a failed
+          // dispatch.
           let recipientType: "owner" | "agent" | undefined;
+          let leadName = (q as any).name || "";
+          let leadAddress = "";
+          let leadCity = "";
           if (q.lead_id) {
             try {
-              const { data: rt } = await supabase
+              const { data: lead } = await supabase
                 .from("leads")
-                .select("recipient_type")
+                .select("recipient_type, owner_name, address, city")
                 .eq("id", q.lead_id)
                 .single();
-              const v = (rt as any)?.recipient_type;
+              const v = (lead as any)?.recipient_type;
               if (v === "agent" || v === "owner") recipientType = v;
+              if (!leadName) leadName = (lead as any)?.owner_name || "";
+              leadAddress = (lead as any)?.address || "";
+              leadCity = (lead as any)?.city || "";
             } catch {
-              // Column missing or lookup failed: owner script.
+              // Column missing or lookup failed: owner script, no
+              // address clause — the voice route omits blank clauses
+              // instead of speaking a fallback.
             }
           }
           const { callSid } = await createOwnDialerCall(creds, {
             to: dialable,
             callLogId: logId,
-            leadName: (q as any).name || "",
+            leadName,
+            leadAddress,
+            leadCity,
             recipientType,
           });
           await supabase
